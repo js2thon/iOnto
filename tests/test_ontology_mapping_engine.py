@@ -119,6 +119,10 @@ class MappingContractEngineTests(unittest.TestCase):
         department = next(v for v in result["instances"].values() if v.object_type_id == "ot:department")
         self.assertEqual([department.id], employee.relationship_refs["r:employee-dept"])
         self.assertEqual(1, employee.mapping_versions["m:join"])
+        self.assertEqual(1, len(employee.lineage.relationships))
+        self.assertEqual("m:join", employee.lineage.relationships[0].mapping_contract_id)
+        self.assertEqual("employee", employee.lineage.relationships[0].source.table)
+        self.assertEqual("department", employee.lineage.relationships[0].target.table)
 
     def test_duplicate_identity_conflict_is_reported_not_overwritten(self):
         schema = self.make_schema()
