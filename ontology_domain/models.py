@@ -111,10 +111,12 @@ class Relationship:
     target_object_type_id: str
     description: str = ""
     relationship_kind: str = "association"
+    # For A -> B, source cardinality is the number of B instances per A;
+    # target cardinality is the number of A instances per B.
     source_min_cardinality: int = 0
-    source_max_cardinality: Optional[int] = None
+    source_max_cardinality: Optional[int] = 1
     target_min_cardinality: int = 0
-    target_max_cardinality: Optional[int] = 1
+    target_max_cardinality: Optional[int] = None
     inverse_relationship_id: Optional[str] = None
     mapping_ref: Optional[str] = None
     evidence: List[Dict[str, Any]] = field(default_factory=list)

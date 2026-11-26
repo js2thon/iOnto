@@ -64,11 +64,33 @@ class FieldLineage:
 
 
 @dataclass
+class RelationshipLineage:
+    """Provenance for one materialized ontology relationship edge."""
+
+    relationship_id: str
+    source: SourceRecordRef
+    target: SourceRecordRef
+    mapping_contract_id: Optional[str] = None
+    mapping_contract_version: Optional[int] = None
+    join_key_hash: Optional[str] = None
+    evidence: List[Dict[str, Any]] = field(default_factory=list)
+
+    def validate(self) -> None:
+        if not self.relationship_id:
+            raise ValueError("RelationshipLineage.relationship_id is required")
+        self.source.validate()
+        self.target.validate()
+        if self.mapping_contract_version is not None and self.mapping_contract_version < 1:
+            raise ValueError("RelationshipLineage.mapping_contract_version must be >= 1")
+
+
+@dataclass
 class SourceLineage:
     """Record-level provenance for an ontology instance."""
 
     sources: List[SourceRecordRef] = field(default_factory=list)
     fields: List[FieldLineage] = field(default_factory=list)
+    relationships: List[RelationshipLineage] = field(default_factory=list)
     ingestion_run_id: Optional[str] = None
     mapping_run_id: Optional[str] = None
     created_at: str = field(default_factory=utc_now)
@@ -78,6 +100,8 @@ class SourceLineage:
         for source in self.sources:
             source.validate()
         for item in self.fields:
+            item.validate()
+        for item in self.relationships:
             item.validate()
 
 
@@ -136,6 +160,11 @@ class OntologyInstance:
             for target_id in targets:
                 if not isinstance(target_id, str) or not target_id:
                     raise ValueError("Relationship target instance IDs must be non-empty strings")
+        for relation_trace in self.lineage.relationships:
+            if relation_trace.relationship_id not in known_relationships:
+                raise ValueError(f"Lineage references unknown Relationship {relation_trace.relationship_id}")
+            if relation_trace.mapping_contract_id and relation_trace.mapping_contract_id not in schema.mapping_contracts:
+                raise ValueError(f"Lineage references unknown MappingContract {relation_trace.mapping_contract_id}")
         for field_trace in self.lineage.fields:
             if field_trace.target_property_id not in known_properties:
                 raise ValueError(f"Lineage references unknown target Property {field_trace.target_property_id}")
