@@ -211,3 +211,28 @@ Run persistence tests:
 ```bash
 python -m unittest discover -s tests -p "test_ontology_sqlite_repository.py" -v
 ```
+
+
+## Streamlit mapping workbench integration (V5.1 phase 2)
+
+The navigation page **映射工作台** bridges the current data-source session to the V5 domain model and persistence repository:
+
+- The compatibility adapter creates stable V5 object/property/relationship identifiers from the legacy ontology. Existing table/column names are only suggestions; no field mapping is silently approved.
+- Property mapping supports direct assignment, allow-listed deterministic transforms, explicit target property data types, and stable source record keys when the legacy primary key is known.
+- Relationship mapping supports explicit source/target datasets and one or more Join Key pairs.
+- Saved contracts start as `pending/draft`. A user must explicitly approve them before the production execution action is enabled.
+- Preview executes a deep copy with temporary approval and does not change the persisted contract review state.
+- Production execution persists the schema snapshot, mapping run, materialized instances and field/relationship lineage to SQLite. Run history is queryable by ontology/version.
+- Release publication uses the existing checksum and immutable-version gate. Editing a released version creates a new draft version instead of mutating the release.
+
+Default database: `ontology_workspace/v5_ontology.db`. No Docker or additional third-party dependency is introduced.
+
+### Current boundaries
+
+The existing source connectors still load CSV/Excel/PostgreSQL rows into Pandas memory. The workbench does not yet provide chunked execution, CDC/incremental refresh, a PostgreSQL V5 repository, concurrent multi-user editing, or a V5 query runtime. The legacy Q&A path is intentionally unchanged in this phase. Browser-based Streamlit interaction and real PostgreSQL deployment still require environment-level acceptance testing.
+
+Run the workbench integration tests:
+
+```bash
+python -m unittest discover -s tests -p "test_ontology_mapping_workbench.py" -v
+```
