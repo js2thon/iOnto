@@ -148,6 +148,7 @@ def build_relationship_contract(
     source_record_key_fields: Optional[List[str]] = None,
     target_record_key_fields: Optional[List[str]] = None,
     source_kind: str = "file",
+    target_source_kind: Optional[str] = None,
     source_schema_hash: Optional[str] = None,
 ) -> MappingContract:
     relation = schema.relationships.get(relationship_id)
@@ -178,7 +179,7 @@ def build_relationship_contract(
             "relationship_id": relationship_id,
             "target_table": target_table,
             "source_id": f"dataset:{target_table}",
-            "source_kind": source_kind,
+            "source_kind": target_source_kind or source_kind,
             "record_key_fields": list(target_record_key_fields or []),
             "source_object_type_id": source_obj.id,
             "target_object_type_id": target_obj.id,
