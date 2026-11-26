@@ -12,6 +12,7 @@ from .mapping_workbench import (
     build_relationship_contract,
     execute_and_persist,
     legacy_ontology_to_schema,
+    load_latest_schema,
     next_editable_version,
     preview_mapping,
     set_contract_review,
@@ -30,14 +31,22 @@ def _primary_key_for(legacy_ontology: Any, table: str) -> List[str]:
     return [str(field)] if field else []
 
 
-def _initialize_schema(legacy_ontology: Any, raw_data: Dict[str, Any]) -> Any:
+def _initialize_schema(legacy_ontology: Any, raw_data: Dict[str, Any], repository: Any) -> Any:
     fingerprint = source_fingerprint(raw_data)
     current = st.session_state.get("v5_mapping_schema")
-    if current is None or st.session_state.get("v5_mapping_source_fingerprint") != fingerprint:
-        current = legacy_ontology_to_schema(legacy_ontology)
-        current.metadata["source_schema_fingerprint"] = fingerprint
-        st.session_state.v5_mapping_schema = current
+    previous_fingerprint = st.session_state.get("v5_mapping_source_fingerprint")
+    if current is not None:
+        if previous_fingerprint and previous_fingerprint != fingerprint:
+            st.session_state.v5_mapping_source_changed = True
         st.session_state.v5_mapping_source_fingerprint = fingerprint
+        return current
+    current = load_latest_schema(legacy_ontology, repository)
+    current.metadata.setdefault("source_schema_fingerprint", fingerprint)
+    st.session_state.v5_mapping_schema = current
+    st.session_state.v5_mapping_source_fingerprint = fingerprint
+    st.session_state.v5_mapping_source_changed = (
+        current.metadata.get("source_schema_fingerprint") not in (None, fingerprint)
+    )
     return current
 
 
@@ -51,8 +60,8 @@ def render_mapping_workbench() -> None:
         st.info("请先在「数据源」加载 CSV / Excel / PostgreSQL 数据，并在「本体建模」生成业务对象本体。")
         return
 
-    schema = _initialize_schema(legacy_ontology, raw_data)
     repository = SQLiteOntologyRepository()
+    schema = _initialize_schema(legacy_ontology, raw_data, repository)
     fingerprint = source_fingerprint(raw_data)
     st.session_state.v5_mapping_schema = schema
 
@@ -67,6 +76,8 @@ def render_mapping_workbench() -> None:
     metric_cols[2].metric("属性", len(schema.properties))
     metric_cols[3].metric("关系", len(schema.relationships))
     st.caption(f"数据源结构指纹：{fingerprint[:24]}… · SQLite：ontology_workspace/v5_ontology.db")
+    if st.session_state.get("v5_mapping_source_changed"):
+        st.warning("检测到数据源结构发生变化。已保留已保存的 V5 Schema 和映射契约；请逐项检查源字段与 Join Key 后再执行。")
 
     tab_property, tab_relationship, tab_review, tab_runs = st.tabs([
         "字段映射", "关系 Join", "审核与发布", "运行与血缘",
