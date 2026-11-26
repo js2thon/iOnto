@@ -94,6 +94,18 @@ class OntologyQueryPipelineTests(unittest.TestCase):
         self.assertTrue(result["found"])
         self.assertEqual(result["length"], 1)
 
+    def test_path_relation_evidence_is_validated(self):
+        plan = _validate_plan({
+            "intent": "path", "source_type": "Employee", "source_pk": "E1",
+            "target_type_to": "Department", "target_pk": "D1",
+            "relation_type": "employee_to_department",
+        }, self.ontology)
+        result = execute_query_plan(self.ontology, plan)
+        result["relations"] = []
+        validation = validate_result(self.ontology, plan, result)
+        self.assertFalse(validation["valid"])
+        self.assertTrue(any("路径关系证据" in error for error in validation["errors"]))
+
     def test_path_empty_result_fails_when_path_exists(self):
         plan = _validate_plan({
             "intent": "path", "source_type": "Employee", "source_pk": "E1",
