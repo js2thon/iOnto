@@ -108,6 +108,42 @@ def _source_id(contract: MappingContract) -> str:
     return str(contract.source_ref.get("source_id") or _contract_source_table(contract) or "source:unknown")
 
 
+def _validate_property_value(prop: Any, value: Any) -> None:
+    if value is None:
+        if prop.required or not prop.nullable:
+            raise ValueError(f"属性 {prop.name} 不允许为空")
+        return
+    kind = prop.data_type
+    valid = True
+    if kind == "string":
+        valid = isinstance(value, str)
+    elif kind == "integer":
+        valid = isinstance(value, int) and not isinstance(value, bool)
+    elif kind in {"decimal", "number"}:
+        try:
+            Decimal(str(value))
+        except (InvalidOperation, ValueError):
+            valid = False
+    elif kind == "boolean":
+        valid = isinstance(value, bool)
+    elif kind == "date":
+        try:
+            date.fromisoformat(str(value))
+        except ValueError:
+            valid = False
+    elif kind == "datetime":
+        try:
+            datetime.fromisoformat(str(value))
+        except ValueError:
+            valid = False
+    elif kind == "enum":
+        valid = value in prop.enum_values
+    elif kind == "json":
+        valid = isinstance(value, (dict, list))
+    if not valid:
+        raise ValueError(f"属性 {prop.name} 的值与声明类型 {kind} 不匹配")
+
+
 def _identity_for(schema: OntologySchema, object_type_id: str, values: Dict[str, Any]):
     obj = schema.object_types[object_type_id]
     for identity_id in obj.identity_ids:
@@ -236,6 +272,7 @@ def execute_mapping(
                                 raise ValueError("源值为空且 null_policy=reject")
                             elif contract.null_policy == "drop":
                                 continue
+                        _validate_property_value(schema.properties[property_id], value)
                         values[property_id] = value
                         source = SourceRecordRef(
                             source_id=_source_id(contract), dataset=contract.source_ref.get("dataset"),
@@ -256,6 +293,17 @@ def execute_mapping(
                         errors.append({"contract_id": contract.id, "table": table, "row": row_index, "field": field_name, "reason": str(exc)})
                         row_failed = True
                 if row_failed:
+                    continue
+                missing_required = [
+                    prop.id for prop in schema.properties.values()
+                    if prop.domain_object_type_id == object_type_id
+                    and prop.required and prop.id not in values
+                ]
+                if missing_required:
+                    errors.append({
+                        "table": table, "row": row_index, "object_type_id": object_type_id,
+                        "reason": "缺少必填属性: " + ", ".join(missing_required),
+                    })
                     continue
                 identity = _identity_for(schema, object_type_id, values)
                 if identity is None:
