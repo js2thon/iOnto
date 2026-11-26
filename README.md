@@ -1,4 +1,4 @@
-# iOnto V5.0 — 企业本体建模 Pipeline 工作台
+# iOnto V5.1 — 企业本体建模 Pipeline 工作台
 
 企业本体建模 Pipeline 工作台。
 
@@ -7,7 +7,7 @@
 - **数据源**：CSV / Excel 多文件导入；PostgreSQL 连接、Schema 选表、按表加载
 - **本体建模（旧版工作台）**：表结构驱动的对象类型生成、主键推断、关系识别、Schema/实例图谱、质量检测、JSON/OWL 导出
 - **V5 领域模型**：ObjectType、Property、Relationship、Identity、Constraint、MappingContract；独立实例模型与字段级血缘
-- **V5 映射引擎**：审核通过的映射契约确定性执行，支持属性映射、白名单转换、关系 Join、实例物化与血缘记录（当前为独立执行服务）
+- **V5.1 映射工作台**：字段映射编辑、目标类型配置、关系 Join Key、模拟预览、人工审核、确定性执行、SQLite 持久化和发布门禁
 - **V5 SQLite 持久化基础**：本体版本、映射运行、实例、血缘与不可变发布包；默认本地数据库 `ontology_workspace/v5_ontology.db`
 - **智能问答**：LLM 语义理解 → 结构化查询计划 → 本体确定性执行 → 结果校验 → 证据链 → LLM 答案表达
 - **问题测评**：CQ 问题集、自动测评、确定性比对、失败归因
@@ -24,7 +24,7 @@
 5. **证据溯源**：记录查询计划、对象标识、对象记录、关系路径、版本号和结果 SHA-256。
 6. **答案生成**：LLM 只接收已验证结果和证据，负责组织简洁自然语言，不得补充证据之外的事实。
 
-旧版在线问答的证据链达到**本体对象/关系级**。V5 新增的映射执行服务可在内存物化实例并记录字段级血缘；V5.1 增加了 SQLite repository API，可持久化 Schema、运行记录、实例和发布快照。但这些能力尚未接入旧版 Streamlit 数据导入、映射画布和问答执行路径；不能将底层服务能力误认为工作台已端到端启用。
+旧版在线问答的证据链达到**本体对象/关系级**。V5.1 映射工作台已接入现有 Streamlit 数据源会话、V5 Mapping Engine 和 SQLite Repository，可配置字段/关系映射、模拟预览、审核、执行、查看运行与血缘并发布不可变版本。V5 查询运行时尚未迁移到新的 V5 实例存储，问答仍沿用兼容运行时。
 
 运行核心查询模块测试：
 
@@ -125,9 +125,7 @@ ontology_workspace/
 
 ## 工程状态与整体 Review
 
-V5.0 当前已具备领域模型、实例/血缘模型和确定性映射执行服务，但映射画布、
-持久化和 V5 问答尚未完成端到端集成。已完成的代码审查、缺陷修复和剩余
-工程事项见 [V5 Overall Code Review](docs/OVERALL_CODE_REVIEW_V5.md)。
+V5.1 已完成领域模型、实例/血缘、确定性映射引擎、SQLite 持久化和映射工作台第一轮集成。V5 问答迁移、增量/大规模数据处理和浏览器端部署验收仍是后续工作。整体代码审查见 [V5 Overall Code Review](docs/OVERALL_CODE_REVIEW_V5.md)。
 
 ## V5 映射引擎快速使用（Python API）
 
@@ -137,9 +135,18 @@ V5 映射引擎位于 `ontology_domain.mapping_engine`，面向已构建的
 `"released"`）。具体模型、转换操作、关系 Join 约定和当前集成边界见
 [`docs/V5_DOMAIN_MODEL.md`](docs/V5_DOMAIN_MODEL.md)。
 
-目前它还不是 Streamlit 中可直接点击使用的映射画布；旧版数据源/建模/问答
-仍使用兼容运行时结构。V5 工作台 UI、数据库持久化、增量更新和端到端查询
-切换将在后续集成阶段完成。
+映射工作台入口为侧边导航中的「🧩 映射工作台」。旧版数据源和本体建模仍负责数据加载与初始对象发现；映射工作台将其转换为 V5 Schema 草稿，并要求用户明确确认字段映射和关系 Join。
 
 
 V5.1 SQLite repository 的 API 和发布门禁见 [V5 Domain Model 文档](docs/V5_DOMAIN_MODEL.md#sqlite-persistence-and-release-bundles-v51-foundation)。
+
+
+## V5.1 映射工作台操作
+
+1. 在「数据源」加载 CSV / Excel / PostgreSQL 数据，并在「本体建模」确认对象类型与关系。
+2. 打开「映射工作台」，选择目标业务对象、源数据集、源字段和目标属性类型；保存后契约处于 pending/draft。
+3. 在「关系 Join」配置关系两端数据集和 Join Key（支持复合键）。
+4. 在「审核与发布」模拟预览，查看实例数、映射错误和阻断契约；人工批准后才可正式执行。
+5. 正式执行结果、实例和字段/关系血缘写入 `ontology_workspace/v5_ontology.db`；满足门禁后可发布不可变版本。
+
+预览会在内存副本上临时放行草稿契约，不改变正式审核状态；正式执行只运行已批准且激活的契约。当前数据源仍由现有连接器加载到内存，尚未实现 CDC、增量刷新或大数据分块执行。

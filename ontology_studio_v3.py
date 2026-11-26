@@ -45,6 +45,7 @@ import networkx as nx
 import pandas as pd
 import streamlit as st
 from ontology_query_pipeline import execute_query_pipeline
+from ontology_domain.mapping_workbench_ui import render_mapping_workbench
 from pyvis.network import Network
 from rdflib import Graph, Literal, Namespace, OWL, RDF, RDFS, URIRef
 
@@ -58,7 +59,7 @@ except ImportError:
 # 页面配置与主题
 # ---------------------------------------------------------------------
 st.set_page_config(
-    page_title="iOnto V5.0",
+    page_title="iOnto V5.1",
     page_icon="🕸️",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -2872,9 +2873,9 @@ def save_eval_run(run: Dict[str, Any]) -> None:
 # ---------------------------------------------------------------------
 # Streamlit 主界面（st.navigation 多页 + 页面函数）
 # ---------------------------------------------------------------------
-st.title("🕸️ iOnto V5.0")
+st.title("🕸️ iOnto V5.1")
 st.caption(
-    "企业本体建模 Pipeline 工作台 · 数据源 → 本体建模 → 智能问答 → "
+    "企业本体建模 Pipeline 工作台 · 数据源 → 本体建模 → 映射工作台 → 智能问答 → "
     "问题测评 → 版本管理 · CSV/Excel · Schema/实例图谱 · LLM 问答 · "
     "证据溯源 · 确定性测评 · 版本快照/回滚"
 )
@@ -3059,12 +3060,14 @@ def _build_ontology_from_raw(
 def _commit_raw_data(
     preview_data: Dict[str, pd.DataFrame],
     auto_build: bool = True,
+    source_kind: str = "file",
 ) -> Optional[str]:
     """将预览数据写入会话；默认自动生成本体。
 
     返回错误信息；成功返回 None。
     """
     st.session_state.raw_data_v2 = preview_data or {}
+    st.session_state.source_kinds_v2 = {str(name): source_kind for name in (preview_data or {})}
     st.session_state.messages_v2 = []
     st.session_state.manual_links_config = []
     st.session_state.pk_config = {}
@@ -3352,7 +3355,7 @@ def render_data_source() -> None:
                                             use_container_width=True,
                                         )
                                 err = _commit_raw_data(
-                                    preview_data, auto_build=True
+                                    preview_data, auto_build=True, source_kind="postgresql"
                                 )
                                 if err:
                                     st.error(f"数据已加载，但自动建模失败：{err}")
@@ -4450,6 +4453,7 @@ pages = [
     st.Page(render_overview, title="🏠 Pipeline 总览", default=True),
     st.Page(render_data_source, title="📥 数据源"),
     st.Page(render_modeling, title="🏗️ 本体建模"),
+    st.Page(render_mapping_workbench, title="🧩 映射工作台"),
     st.Page(render_qa, title="💬 智能问答"),
     st.Page(render_evaluation, title="🧪 问题测评"),
     st.Page(render_versions, title="🗂️ 版本管理"),

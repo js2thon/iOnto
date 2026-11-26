@@ -91,6 +91,18 @@ class SQLiteOntologyRepositoryTests(unittest.TestCase):
         with self.assertRaisesRegex(RepositoryError, "unapproved/inactive"):
             self.repo.publish_release(self.schema)
 
+    def test_list_mapping_runs_returns_latest_first(self):
+        self.repo.save_schema(self.schema)
+        for run_id in ("run-old", "run-new"):
+            self.repo.save_mapping_run(self.schema, {
+                "run_id": run_id, "ontology_id": self.schema.ontology_id,
+                "ontology_version": self.schema.version, "instances": {}, "success": True,
+            })
+        rows = self.repo.list_mapping_runs("ontology:test", 1, limit=1)
+        self.assertEqual(1, len(rows))
+        self.assertIn(rows[0]["run_id"], {"run-old", "run-new"})
+        self.assertEqual("succeeded", rows[0]["status"])
+
     def test_run_version_must_match_schema(self):
         with self.assertRaises(RepositoryError):
             self.repo.save_mapping_run(self.schema, {

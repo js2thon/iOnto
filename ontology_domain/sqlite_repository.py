@@ -320,6 +320,18 @@ class SQLiteOntologyRepository:
             raise RepositoryError("Release bundle checksum mismatch")
         return json.loads(row["bundle_json"])
 
+    def list_mapping_runs(self, ontology_id: str, version: int, *, limit: int = 20) -> list[Dict[str, Any]]:
+        """List recent mapping runs for one immutable ontology version."""
+        safe_limit = max(1, min(int(limit), 500))
+        with self._connect() as db:
+            rows = db.execute("""
+                SELECT run_id, status, result_checksum, created_at
+                FROM mapping_runs
+                WHERE ontology_id=? AND ontology_version=?
+                ORDER BY created_at DESC, run_id DESC LIMIT ?
+            """, (ontology_id, version, safe_limit)).fetchall()
+        return [dict(row) for row in rows]
+
     def list_releases(self, ontology_id: str) -> list[Dict[str, Any]]:
         with self._connect() as db:
             rows = db.execute("""
