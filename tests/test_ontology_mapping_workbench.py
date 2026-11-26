@@ -58,6 +58,22 @@ class MappingWorkbenchServiceTests(unittest.TestCase):
         self.assertEqual(2, result["instance_count"])
         self.assertTrue(all(c.review_status == "pending" for c in self.schema.mapping_contracts.values()))
 
+    def test_preview_does_not_override_rejected_contracts(self):
+        contract = build_property_contract(
+            self.schema,
+            object_type_id=self.object_id,
+            property_id=self.properties["employee_id"],
+            source_table="employees",
+            source_field="employee_id",
+            record_key_fields=["employee_id"],
+        )
+        contract.review_status = "rejected"
+        self.schema.mapping_contracts[contract.id] = contract
+        result = preview_mapping(self.schema, self.rows)
+        self.assertFalse(result["success"])
+        self.assertTrue(result["blocked_contracts"])
+        self.assertEqual("rejected", self.schema.mapping_contracts[contract.id].review_status)
+
     def test_latest_persisted_schema_is_restored(self):
         legacy = SimpleNamespace(
             object_types={"employees": {"primary_key": "employee_id", "properties": ["employee_id", "name"]}},
