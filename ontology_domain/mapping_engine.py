@@ -100,6 +100,15 @@ def _source_id(contract: MappingContract) -> str:
     return str(contract.source_ref.get("source_id") or _contract_source_table(contract) or "source:unknown")
 
 
+def _record_key(row: Dict[str, Any], source_ref: Dict[str, Any], row_number: int) -> Dict[str, Any]:
+    fields = source_ref.get("record_key_fields") or source_ref.get("primary_key_field") or []
+    if isinstance(fields, str):
+        fields = [fields]
+    if fields and all(field in row and row.get(field) is not None for field in fields):
+        return {str(field): row[field] for field in fields}
+    return {"row_number": row_number}
+
+
 def _validate_property_value(prop: Any, value: Any) -> None:
     if value is None:
         if prop.required or not prop.nullable:
