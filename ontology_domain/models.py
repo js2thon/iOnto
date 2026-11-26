@@ -269,24 +269,47 @@ class OntologySchema:
         for rel in self.relationships.values():
             if rel.source_object_type_id not in self.object_types or rel.target_object_type_id not in self.object_types:
                 errors.append(f"Relationship {rel.id} references a missing ObjectType")
-            if rel.inverse_relationship_id and rel.inverse_relationship_id not in self.relationships:
-                errors.append(f"Relationship {rel.id} references missing inverse Relationship {rel.inverse_relationship_id}")
+            if rel.inverse_relationship_id:
+                inverse = self.relationships.get(rel.inverse_relationship_id)
+                if inverse is None:
+                    errors.append(f"Relationship {rel.id} references missing inverse Relationship {rel.inverse_relationship_id}")
+                elif (
+                    inverse.source_object_type_id != rel.target_object_type_id
+                    or inverse.target_object_type_id != rel.source_object_type_id
+                ):
+                    errors.append(f"Relationship {rel.id} inverse endpoints are not reversed")
         for identity in self.identities.values():
             if identity.object_type_id not in self.object_types:
                 errors.append(f"Identity {identity.id} references a missing ObjectType")
             for prop_id in identity.property_refs:
-                if prop_id not in self.properties:
+                prop = self.properties.get(prop_id)
+                if prop is None:
                     errors.append(f"Identity {identity.id} references missing Property {prop_id}")
+                elif prop.domain_object_type_id != identity.object_type_id:
+                    errors.append(f"Identity {identity.id} references Property {prop_id} from another ObjectType")
         for obj in self.object_types.values():
             for prop_id in obj.property_ids:
-                if prop_id not in self.properties:
+                prop = self.properties.get(prop_id)
+                if prop is None:
                     errors.append(f"ObjectType {obj.id} references missing Property {prop_id}")
+                elif prop.domain_object_type_id != obj.id:
+                    errors.append(f"ObjectType {obj.id} references Property {prop_id} owned by another ObjectType")
             for identity_id in obj.identity_ids:
-                if identity_id not in self.identities:
+                identity = self.identities.get(identity_id)
+                if identity is None:
                     errors.append(f"ObjectType {obj.id} references missing Identity {identity_id}")
+                elif identity.object_type_id != obj.id:
+                    errors.append(f"ObjectType {obj.id} references Identity {identity_id} owned by another ObjectType")
             for relationship_id in obj.relationship_ids:
-                if relationship_id not in self.relationships:
+                rel = self.relationships.get(relationship_id)
+                if rel is None:
                     errors.append(f"ObjectType {obj.id} references missing Relationship {relationship_id}")
+                elif obj.id not in {rel.source_object_type_id, rel.target_object_type_id}:
+                    errors.append(f"ObjectType {obj.id} is not an endpoint of Relationship {relationship_id}")
+        known_targets = set(self.object_types) | set(self.properties) | set(self.relationships) | set(self.identities) | set(self.mapping_contracts)
+        for constraint in self.constraints.values():
+            if constraint.target_ref not in known_targets:
+                errors.append(f"Constraint {constraint.id} references unknown target {constraint.target_ref}")
         for contract in self.mapping_contracts.values():
             target = contract.target_ref
             for key, collection in (
@@ -298,6 +321,11 @@ class OntologySchema:
                 target_id = target.get(key)
                 if target_id and target_id not in collection:
                     errors.append(f"MappingContract {contract.id} references missing {key} {target_id}")
+            object_type_id = target.get("object_type_id")
+            property_id = target.get("property_id")
+            if object_type_id and property_id in self.properties:
+                if self.properties[property_id].domain_object_type_id != object_type_id:
+                    errors.append(f"MappingContract {contract.id} target Property does not belong to ObjectType {object_type_id}")
         return errors
 
     def to_dict(self) -> Dict[str, Any]:
