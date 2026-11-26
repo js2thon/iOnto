@@ -72,3 +72,36 @@ python -m unittest tests.test_ontology_domain_models -v
 3. Add data profiling, identity resolution and relationship evidence models.
 4. Add SHACL export/validation as an optional quality engine.
 5. Introduce dual-read validation before switching the workbench to V5 models.
+
+
+## Instance and source-lineage model
+
+Runtime instances are represented separately from the schema by `OntologyInstance`.
+Each instance carries:
+- stable instance ID and ObjectType ID;
+- identity values keyed by ontology Property IDs;
+- property values keyed by ontology Property IDs;
+- outgoing relationship references keyed by Relationship IDs;
+- ontology schema version and mapping contract versions;
+- valid-time interval and observed timestamp;
+- record-level and field-level source lineage.
+
+`SourceRecordRef` locates a source record using a source identifier plus a table
+primary/business key, file URI, sheet/row, page, or document locator. A locator
+must contain at least one concrete record/document position.
+
+`FieldLineage` connects a target ontology Property to a source record and optional
+source field, value hash, MappingContract ID/version, transformation reference,
+confidence and evidence. This supports field-level provenance without storing raw
+sensitive source values in lineage metadata.
+
+The model validates that instance properties and outgoing relationships belong to
+the declared ObjectType, and that lineage targets are valid properties in the
+selected ontology schema. It does not itself execute mappings or resolve target
+instance IDs; those belong to the mapping/materialization service.
+
+Tests:
+
+```bash
+python -m unittest discover -s tests -p "test_ontology_instance_lineage.py" -v
+```
