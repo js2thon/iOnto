@@ -2306,10 +2306,17 @@ def _atomic_write_json(path: str, data: Any, compact: bool = True) -> None:
         separators=(",", ":") if compact else None,
         default=str,
     )
-    tmp_path = path + ".tmp"
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        f.write(text)
-    os.replace(tmp_path, path)
+    directory = os.path.dirname(path) or "."
+    fd, tmp_path = tempfile.mkstemp(prefix=".iOnto-", suffix=".tmp", dir=directory)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+    finally:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 
 def _read_json(path: str) -> Optional[Any]:
@@ -2339,22 +2346,9 @@ def _verify_roundtrip(ontology: Ontology) -> Optional[str]:
     try:
         data = ontology.snapshot_dict()
         rebuilt = Ontology.from_dict(json.loads(json.dumps(data, default=str)))
-        edges_before = {
-            (u, v, str(k)) for u, v, k in ontology.links.edges(keys=True)
-        }
-        edges_after = {
-            (u, v, str(k)) for u, v, k in rebuilt.links.edges(keys=True)
-        }
-        if edges_before != edges_after:
-            return f"边集不一致：{len(edges_before)} → {len(edges_after)}"
-        for type_name in ontology.object_types:
-            count_before = len(ontology.objects.get(type_name, {}))
-            count_after = len(rebuilt.objects.get(type_name, {}))
-            if count_before != count_after:
-                return (
-                    f"类型 {type_name} 对象数不一致："
-                    f"{count_before} → {count_after}"
-                )
+        rebuilt_data = rebuilt.snapshot_dict()
+        if data != rebuilt_data:
+            return "快照 round-trip 后存在内容差异（Schema / 实例 / 关系 / 映射 / Action）"
         return None
     except Exception as exc:
         return f"round-trip 自检异常：{exc}"
@@ -2364,6 +2358,14 @@ def _verify_roundtrip(ontology: Ontology) -> Optional[str]:
 # 版本管理
 # ---------------------------------------------------------------------
 def _version_path(version_id: str) -> str:
+    version_id = str(version_id or "")
+    if (
+        not version_id
+        or version_id in {".", ".."}
+        or os.path.basename(version_id) != version_id
+        or any(sep in version_id for sep in ("/", "\\\\"))
+    ):
+        raise ValueError("非法版本 ID")
     return os.path.join(VERSIONS_DIR, f"{version_id}.json")
 
 
@@ -2404,6 +2406,8 @@ def save_version(
 ) -> Tuple[str, Optional[str]]:
     """保存当前本体为版本快照；返回 (版本 ID, 自检错误)。"""
     _ensure_workspace()
+    if status not in VERSION_STATUS_FLOW:
+        return "", f"非法版本状态：{status}"
     error = _verify_roundtrip(ontology)
     if error:
         return "", error
@@ -2449,17 +2453,18 @@ def update_version_status(version_id: str, new_status: str) -> bool:
     data = _read_json(path)
     if not isinstance(data, dict):
         return False
+    if new_status not in VERSION_STATUS_FLOW:
+        return False
     meta = data.setdefault("meta", {})
     old_status = str(meta.get("status", "draft"))
-    if (
-        old_status in VERSION_STATUS_FLOW
-        and new_status in VERSION_STATUS_FLOW
-        and VERSION_STATUS_FLOW.index(new_status)
-        <= VERSION_STATUS_FLOW.index(old_status)
-    ):
-        # 只允许单向流转（或显式降级 deprecated）
-        if new_status != "deprecated":
-            return False
+    allowed = {
+        "draft": {"validated", "deprecated"},
+        "validated": {"released", "deprecated"},
+        "released": {"deprecated"},
+        "deprecated": set(),
+    }
+    if new_status not in allowed.get(old_status, set()):
+        return False
     meta["status"] = new_status
     _atomic_write_json(path, data, compact=True)
     return True
