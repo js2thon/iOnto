@@ -229,7 +229,9 @@ def execute_and_persist(schema: OntologySchema, source_data: Dict[str, Any], rep
 def next_editable_version(schema: OntologySchema, repository: Any) -> OntologySchema:
     """Clone a released version before edits; never mutate a published snapshot."""
     releases = repository.list_releases(schema.ontology_id)
-    if not any(int(item["ontology_version"]) == schema.version for item in releases):
+    has_release = any(int(item["ontology_version"]) == schema.version for item in releases)
+    has_runs = bool(repository.list_mapping_runs(schema.ontology_id, schema.version, limit=1))
+    if not has_release and not has_runs:
         return schema
     versions = repository.list_schema_versions(schema.ontology_id)
     next_version = max([int(item["version"]) for item in versions] + [schema.version]) + 1
