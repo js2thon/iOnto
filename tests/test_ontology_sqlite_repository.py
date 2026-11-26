@@ -103,6 +103,16 @@ class SQLiteOntologyRepositoryTests(unittest.TestCase):
         self.assertIn(rows[0]["run_id"], {"run-old", "run-new"})
         self.assertEqual("succeeded", rows[0]["status"])
 
+    def test_schema_version_cannot_change_after_mapping_run(self):
+        self.repo.save_schema(self.schema)
+        self.repo.save_mapping_run(self.schema, {
+            "run_id": "immutable-run", "ontology_id": self.schema.ontology_id,
+            "ontology_version": self.schema.version, "instances": {}, "success": True,
+        })
+        self.schema.metadata["changed_after_run"] = True
+        with self.assertRaisesRegex(RepositoryError, "already has mapping runs"):
+            self.repo.save_schema(self.schema)
+
     def test_run_version_must_match_schema(self):
         with self.assertRaises(RepositoryError):
             self.repo.save_mapping_run(self.schema, {
