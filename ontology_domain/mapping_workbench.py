@@ -212,8 +212,9 @@ def preview_mapping(schema: OntologySchema, source_data: Dict[str, Any]) -> Dict
     """Simulate all configured contracts without changing their review state."""
     candidate = deepcopy(schema)
     for contract in candidate.mapping_contracts.values():
-        contract.review_status = "approved"
-        contract.status = "active"
+        if contract.review_status != "rejected":
+            contract.review_status = "approved"
+            contract.status = "active"
     return execute_mapping(candidate, source_rows(source_data))
 
 
