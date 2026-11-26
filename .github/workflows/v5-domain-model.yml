@@ -23,5 +23,7 @@ jobs:
           python-version: "3.11"
       - name: Compile domain package
         run: python -m compileall -q ontology_domain
-      - name: Run domain model tests
-        run: python -m unittest discover -s tests -p "test_ontology_domain_models.py" -v
+      - name: Run domain and instance lineage tests
+        run: |
+          python -m unittest discover -s tests -p "test_ontology_domain_models.py" -v
+          python -m unittest discover -s tests -p "test_ontology_instance_lineage.py" -v
