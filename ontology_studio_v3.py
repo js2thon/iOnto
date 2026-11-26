@@ -16,9 +16,9 @@ Ontology Studio V4.0
 - 关系质量检查：悬空外键、孤立节点、重复关系等
 - 对象 Action：创建、更新、删除
 - LLM 问答（可选，支持 OpenAI 兼容接口）
-  · 默认 Tool Calling：按需 search/get/neighbors/path/count，不全量塞上下文
-  · 降级：智能检索 / 抽样 / 全量（有上限）
-  · 证据溯源：记录每次问答的工具调用轨迹
+  · LLM 仅负责问题理解与最终表达，不直接调用数据工具
+  · 结构化查询计划 → 本体确定性执行 → 结果校验 → 证据链
+  · 查询计划、执行结果、校验报告与证据链均可追溯
 - 问题测评：CQ 问题集管理、自动测评、确定性比对、失败归因
 - 版本管理：版本快照、差异比较、生命周期、回滚
 - JSON / OWL 导出
@@ -44,6 +44,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import networkx as nx
 import pandas as pd
 import streamlit as st
+from ontology_query_pipeline import execute_query_pipeline
 from pyvis.network import Network
 from rdflib import Graph, Literal, Namespace, OWL, RDF, RDFS, URIRef
 
@@ -2755,7 +2756,7 @@ def attribute_failure(
 ) -> str:
     """失败归因：有序决策树，一条结果只归一个码（可复现）。
 
-    E00 未配置 LLM / E01 API 错误 / E02 超时 / E04 零工具调用 /
+    E00 未配置 LLM / E01 API 错误 / E02 超时 / E04 无查询证据阶段 /
     E05 工具结果未覆盖期望 / E06 覆盖但答案缺失 / E07 数值不匹配 /
     E08 文本不匹配 / E09 问题集漂移（期望实体不存在）/ E10 轮次耗尽
     """
@@ -2901,21 +2902,9 @@ with st.sidebar:
             st.error(f"保存失败：{exc}")
 
     st.header("💬 问答模式")
-    context_limit_mode = st.selectbox(
-        "问答策略",
-        [
-            "工具调用（推荐）",
-            "智能检索（降级）",
-            "每种类型最多 50 条",
-            "每种类型最多 100 条",
-            "全部对象（有上限，易失败）",
-        ],
-        index=0,
-        help=(
-            "工具调用：模型通过 search/get/neighbors/path 等工具按需查本体，"
-            "不把全量实例塞进上下文，适合大数据。"
-            "若模型不支持 function calling，请改用智能检索。"
-        ),
+    st.info(
+        "固定使用确定性本体查询 Pipeline：LLM 解析问题，"
+        "查询规划器生成计划，本体引擎执行，校验器验证，溯源引擎生成证据。"
     )
 
     st.divider()
@@ -3881,10 +3870,8 @@ def render_qa() -> None:
 
     st.subheader("基于本体的智能问答")
     st.caption(
-        "默认「工具调用」：模型只看到 Schema，通过 "
-        "search_objects / get_object / get_neighbors / find_path / "
-        "count_objects 按需查询实例，避免全量加载导致失败。"
-        "每次回答附带工具调用轨迹（证据溯源）。"
+        "LLM 负责语义理解和最终表达；查询规划器生成结构化计划，"
+        "本体执行引擎确定性查询，校验器验证结果，溯源引擎生成证据链。"
     )
 
     # 当前版本标签
@@ -3906,7 +3893,7 @@ def render_qa() -> None:
             trace = message.get("trace")
             if trace:
                 with st.expander(
-                    f"🔍 证据溯源（{len(trace)} 次工具调用）", expanded=False
+                    f"🔍 查询证据链（{len(trace)} 个处理阶段）", expanded=False
                 ):
                     for i, item in enumerate(trace, 1):
                         st.markdown(
@@ -3932,84 +3919,47 @@ def render_qa() -> None:
         with st.chat_message("user"):
             st.markdown(question)
 
-        use_tools = context_limit_mode.startswith("工具调用")
-        if context_limit_mode.startswith("智能检索"):
-            context_mode = "retrieve"
-            max_objects = 30
-        elif "50" in context_limit_mode:
-            context_mode = "sample"
-            max_objects = 50
-        elif "100" in context_limit_mode:
-            context_mode = "sample"
-            max_objects = 100
-        elif context_limit_mode.startswith("全部"):
-            context_mode = "full"
-            max_objects = None
-        else:
-            context_mode = "retrieve"
-            max_objects = 30
-
+        # 所有问答统一走确定性本体查询 Pipeline；不再提供直接上下文问答旁路。
         with st.chat_message("assistant"):
             status_box = st.empty()
             answer_box = st.empty()
             answer_parts: List[str] = []
             structured_trace: List[Dict[str, Any]] = []
-
-            if use_tools:
-                status_box.caption("工具调用模式：准备查询本体…")
-                tool_trace: List[str] = []
-                for event_type, payload in ask_llm_with_tools(
-                    question,
-                    ontology,
-                    api_key,
-                    base_url,
-                    model_name,
-                ):
-                    if event_type == "status":
-                        tool_trace.append(payload)
-                        status_box.caption(" → ".join(tool_trace[-4:]))
-                    elif event_type == "tool":
-                        structured_trace.append(payload)
-                    elif event_type == "token":
-                        answer_parts.append(payload)
-                        answer_box.markdown("".join(answer_parts))
-                    elif event_type == "error":
-                        answer_parts.append(payload)
-                        answer_box.error(payload)
-                status_box.empty()
-                if answer_parts:
-                    answer_box.markdown("".join(answer_parts))
-            else:
-                mode_label = {
-                    "retrieve": "智能检索相关实体",
-                    "sample": f"抽样（每类最多 {max_objects} 条）",
-                    "full": "尽量全量（受字符上限约束）",
-                }.get(context_mode, context_mode)
-                status_box.caption(
-                    f"降级模式：{mode_label}，正在生成回答…"
+            status_box.caption("正在理解问题并生成结构化本体查询计划…")
+            try:
+                if not api_key:
+                    raise RuntimeError("请先配置 LLM API Key。")
+                if OpenAI is None:
+                    raise RuntimeError("缺少 openai 依赖，请执行：pip install openai")
+                client = _make_llm_client(api_key, base_url)
+                pipeline_result = execute_query_pipeline(
+                    client, model_name, question, ontology,
+                    version_id=pointer.get("version_id") if pointer else None,
                 )
+                structured_trace = pipeline_result.get("trace", [])
+                answer = pipeline_result.get("answer", "")
+                validation = pipeline_result.get("validation", {})
+                if not validation.get("valid", False):
+                    answer_box.error(answer)
+                else:
+                    answer_box.markdown(answer)
+                answer_parts.append(answer)
+                status_box.caption(
+                    "查询计划已生成 → 本体查询已执行 → "
+                    + ("结果校验通过" if validation.get("valid") else "结果校验未通过")
+                    + " → 证据链已生成"
+                )
+            except Exception as exc:
+                answer = f"本体查询 Pipeline 执行失败：{_friendly_llm_error(exc)}"
+                answer_parts.append(answer)
+                answer_box.error(answer)
+                structured_trace.append({
+                    "name": "pipeline_error", "args": {},
+                    "result": str(exc),
+                })
+            finally:
+                status_box.empty()
 
-                def _stream_answer():
-                    first = True
-                    for part in ask_llm_stream(
-                        question,
-                        ontology,
-                        api_key,
-                        base_url,
-                        model_name,
-                        max_objects=max_objects,
-                        context_mode=context_mode,
-                    ):
-                        if first:
-                            status_box.empty()
-                            first = False
-                        answer_parts.append(part)
-                        yield part
-                    status_box.empty()
-
-                st.write_stream(_stream_answer())
-
-            answer = "".join(answer_parts)
 
         st.session_state.messages_v2.append({
             "role": "assistant",
@@ -4073,26 +4023,29 @@ def _render_evaluation_running(eval_state: Dict[str, Any]) -> None:
         st.rerun()
         return
 
-    # 消费当前一题
-    answer_parts: List[str] = []
+    # 消费当前一题：复用在线问答的确定性 Pipeline
     trace: List[Dict[str, Any]] = []
     error_text = ""
+    answer = ""
     started = datetime.now()
-    for event_type, payload in ask_llm_with_tools(
-        str(question.get("question", "")),
-        eval_state["eval_ontology"],
-        api_key,
-        base_url,
-        model_name,
-        max_rounds=int(eval_state["config"].get("max_rounds", 4)),
-    ):
-        if event_type == "token":
-            answer_parts.append(payload)
-        elif event_type == "tool":
-            trace.append(payload)
-        elif event_type == "error":
-            error_text = payload
-    answer = "".join(answer_parts)
+    try:
+        if not api_key:
+            raise RuntimeError("请先配置 LLM API Key。")
+        if OpenAI is None:
+            raise RuntimeError("缺少 openai 依赖，请执行：pip install openai")
+        client = _make_llm_client(api_key, base_url)
+        pipeline_result = execute_query_pipeline(
+            client, model_name, str(question.get("question", "")),
+            eval_state["eval_ontology"],
+            version_id=eval_state.get("version_id"),
+        )
+        answer = pipeline_result.get("answer", "")
+        trace = pipeline_result.get("trace", [])
+        if not pipeline_result.get("validation", {}).get("valid", False):
+            error_text = "确定性结果校验未通过"
+    except Exception as exc:
+        error_text = _friendly_llm_error(exc)
+        answer = f"本体查询 Pipeline 执行失败：{error_text}"
     elapsed = (datetime.now() - started).total_seconds()
 
     comparison = compare_answer(question, answer, trace)
@@ -4114,7 +4067,8 @@ def _render_evaluation_running(eval_state: Dict[str, Any]) -> None:
         "text_matched": comparison["text_matched"],
         "numbers_matched": comparison["numbers_matched"],
         "failure_code": failure_code,
-        "tool_calls": len(trace),
+        "pipeline_stages": len(trace),
+        "tool_calls": len(trace),  # legacy compatibility for historical evaluation reports
         "elapsed_seconds": round(elapsed, 1),
         "error": error_text or None,
     })
@@ -4169,7 +4123,7 @@ def _render_evaluation_results() -> None:
                     "问题": r.get("question"),
                     "通过": "✅" if r.get("passed") else "❌",
                     "归因": r.get("failure_code", ""),
-                    "工具调用": r.get("tool_calls", 0),
+                    "Pipeline 阶段": r.get("pipeline_stages", r.get("tool_calls", 0)),
                     "耗时(s)": r.get("elapsed_seconds"),
                 }
                 for r in results
@@ -4213,8 +4167,8 @@ def render_evaluation() -> None:
 
     st.subheader("🧪 问题测评（CQ 问题集 · 自动测评 · 失败归因）")
     st.caption(
-        "确定性比对为主：数值精确比对 + 证据召回（期望实体出现在工具结果中）。"
-        "评测只支持「工具调用」模式，且必须先保存版本（版本绑定评测）。"
+        "确定性比对为主：数值精确比对 + 证据召回（期望实体/关系出现在证据链中）。"
+        "评测使用与在线问答相同的结构化查询 Pipeline，且必须先保存版本（版本绑定评测）。"
     )
 
     if ontology is None:
