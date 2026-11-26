@@ -391,9 +391,15 @@ def validate_result(ontology: Any, plan: Dict[str, Any], result: Dict[str, Any])
                     errors.append(f"路径包含无效关系边：{left} -> {right}")
                 expected_relations.append({
                     "from": left, "to": right,
-                    "relations": sorted(str(v.get("relation_type") or "") for v in matching),
+                    "relations": sorted(str(v.get("relation_type") or k) for k, v in edge_data.items()
+                                        if not plan.get("relation_type") or v.get("relation_type") == plan["relation_type"]),
                 })
-            if result.get("relations", []) != expected_relations:
+            actual_path_relations = [
+                {"from": item.get("from"), "to": item.get("to"),
+                 "relations": sorted(item.get("relations") or [])}
+                for item in result.get("relations", [])
+            ]
+            if actual_path_relations != expected_relations:
                 errors.append("路径关系证据与本体关系图不一致或不完整")
         if bool(result.get("found")) != bool(expected_path):
             errors.append("路径 found 标记与独立计算结果不一致")
