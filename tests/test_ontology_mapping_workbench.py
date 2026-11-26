@@ -7,6 +7,7 @@ from ontology_domain.mapping_workbench import (
     build_property_contract,
     execute_and_persist,
     legacy_ontology_to_schema,
+    load_latest_schema,
     preview_mapping,
 )
 from ontology_domain.sqlite_repository import SQLiteOntologyRepository
@@ -57,6 +58,20 @@ class MappingWorkbenchServiceTests(unittest.TestCase):
         self.assertEqual(2, result["instance_count"])
         self.assertTrue(all(c.review_status == "pending" for c in self.schema.mapping_contracts.values()))
 
+    def test_latest_persisted_schema_is_restored(self):
+        legacy = SimpleNamespace(
+            object_types={"employees": {"primary_key": "employee_id", "properties": ["employee_id", "name"]}},
+            link_types={}, data_mapping={},
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            repository = SQLiteOntologyRepository(Path(directory) / "v5.db")
+            saved = legacy_ontology_to_schema(legacy)
+            saved.metadata["mapping_note"] = "persisted"
+            repository.save_schema(saved)
+            restored = load_latest_schema(legacy, repository)
+            self.assertEqual("persisted", restored.metadata["mapping_note"])
+            self.assertEqual(saved.ontology_id, restored.ontology_id)
+
     def test_execute_persists_instances_and_run(self):
         self.add_contracts()
         with tempfile.TemporaryDirectory() as directory:
@@ -64,8 +79,11 @@ class MappingWorkbenchServiceTests(unittest.TestCase):
             outcome = execute_and_persist(self.schema, self.rows, repository)
             self.assertTrue(outcome["result"]["success"])
             self.assertEqual(2, outcome["persisted"]["instance_count"])
+            second = execute_and_persist(self.schema, self.rows, repository)
+            self.assertNotEqual(outcome["result"]["run_id"], second["result"]["run_id"])
             history = repository.list_mapping_runs(self.schema.ontology_id, self.schema.version)
-            self.assertEqual(outcome["result"]["run_id"], history[0]["run_id"])
+            self.assertEqual(2, len(history))
+            self.assertEqual(second["result"]["run_id"], history[0]["run_id"])
             instances = repository.list_instances(self.schema.ontology_id, self.schema.version)
             self.assertEqual(2, len(instances))
 
