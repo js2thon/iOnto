@@ -104,8 +104,11 @@ def _record_key(row: Dict[str, Any], source_ref: Dict[str, Any], row_number: int
     fields = source_ref.get("record_key_fields") or source_ref.get("primary_key_field") or []
     if isinstance(fields, str):
         fields = [fields]
-    if fields and all(field in row and row.get(field) is not None for field in fields):
-        return {str(field): row[field] for field in fields}
+    if fields:
+        if all(field in row and row.get(field) is not None for field in fields):
+            return {str(field): row[field] for field in fields}
+        if str(source_ref.get("source_kind") or "").lower() in {"database", "postgresql", "sql"}:
+            raise ValueError("数据库记录缺少配置的稳定主键字段值")
     return {"row_number": row_number}
 
 
@@ -175,13 +178,23 @@ def _validate_contracts(schema: OntologySchema) -> Tuple[List[MappingContract], 
         except ValueError as exc:
             blocked.append({"contract_id": contract.id, "reason": str(exc)})
             continue
-        if (
-            str(contract.source_ref.get("source_kind") or "").lower() in {"database", "postgresql", "sql"}
-            and not (contract.source_ref.get("record_key_fields") or contract.source_ref.get("primary_key_field"))
+        database_kinds = {"database", "postgresql", "sql"}
+        source_is_database = str(contract.source_ref.get("source_kind") or "").lower() in database_kinds
+        target_is_database = str(contract.target_ref.get("source_kind") or "").lower() in database_kinds
+        if source_is_database and not (
+            contract.source_ref.get("record_key_fields") or contract.source_ref.get("primary_key_field")
         ):
             blocked.append({
                 "contract_id": contract.id,
                 "reason": "数据库来源映射必须配置 record_key_fields/primary_key_field，不能用不稳定的结果行号作为记录身份",
+            })
+            continue
+        if target_is_database and not (
+            contract.target_ref.get("record_key_fields") or contract.target_ref.get("primary_key_field")
+        ):
+            blocked.append({
+                "contract_id": contract.id,
+                "reason": "数据库目标数据集必须配置 target_ref.record_key_fields/primary_key_field",
             })
             continue
         if contract.review_status != "approved" or contract.status not in {"active", "released"}:
