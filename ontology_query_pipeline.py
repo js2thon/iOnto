@@ -69,6 +69,8 @@ def interpret_question(client: Any, model: str, question: str, ontology: Any) ->
         "JSON 字段：intent,target_type,primary_key,keyword,filters,source_type,"
         "source_pk,target_type_to,target_pk,relation_type,direction,limit。"
         "不确定时用 null；不要猜测主键。"
+        "当用户要求列出/查找某类对象但没有具体关键词时，使用 search，keyword 设为空字符串，"
+        "表示按对象类型列出；不得因为没有关键词而编造关键词。"
         "\n本体 Schema：\n" + json.dumps(schema, ensure_ascii=False)
     )
     request = {
@@ -109,8 +111,9 @@ def _validate_plan(raw: Dict[str, Any], ontology: Any) -> Dict[str, Any]:
             raise QueryPlanError("按主键查询必须指定 target_type")
         if intent == "lookup" and raw.get("primary_key") in (None, ""):
             raise QueryPlanError("按主键查询缺少 primary_key")
-        if intent == "search" and not str(raw.get("keyword") or "").strip():
-            raise QueryPlanError("关键词搜索缺少 keyword")
+        # Empty keyword is a valid type-scoped listing query (e.g. “列出所有员工”).
+        # The executor interprets it as no text filter and still applies type/attribute filters.
+        plan["keyword"] = str(raw.get("keyword") or "").strip()
         plan["target_type"] = t or None
         raw_filters = raw.get("filters") or []
         if raw_filters and not t:
