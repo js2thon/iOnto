@@ -3060,12 +3060,14 @@ def _build_ontology_from_raw(
 def _commit_raw_data(
     preview_data: Dict[str, pd.DataFrame],
     auto_build: bool = True,
+    source_kind: str = "file",
 ) -> Optional[str]:
     """将预览数据写入会话；默认自动生成本体。
 
     返回错误信息；成功返回 None。
     """
     st.session_state.raw_data_v2 = preview_data or {}
+    st.session_state.source_kinds_v2 = {str(name): source_kind for name in (preview_data or {})}
     st.session_state.messages_v2 = []
     st.session_state.manual_links_config = []
     st.session_state.pk_config = {}
@@ -3353,7 +3355,7 @@ def render_data_source() -> None:
                                             use_container_width=True,
                                         )
                                 err = _commit_raw_data(
-                                    preview_data, auto_build=True
+                                    preview_data, auto_build=True, source_kind="postgresql"
                                 )
                                 if err:
                                     st.error(f"数据已加载，但自动建模失败：{err}")
