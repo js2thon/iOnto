@@ -83,6 +83,7 @@ class OntologyQueryPipelineTests(unittest.TestCase):
         result = execute_query_plan(self.ontology, plan)
         self.assertEqual(result["records"][0]["node_id"], "Department:D1")
         self.assertEqual(len(result["relations"]), 1)
+        self.assertTrue(validate_result(self.ontology, plan, result)["valid"])
 
     def test_path_returns_relation_evidence(self):
         plan = _validate_plan({
@@ -93,6 +94,7 @@ class OntologyQueryPipelineTests(unittest.TestCase):
         result = execute_query_plan(self.ontology, plan)
         self.assertTrue(result["found"])
         self.assertEqual(result["length"], 1)
+        self.assertTrue(validate_result(self.ontology, plan, result)["valid"])
 
     def test_path_relation_evidence_is_validated(self):
         plan = _validate_plan({
