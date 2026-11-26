@@ -131,6 +131,12 @@ values. Duplicate identity rows with conflicting properties are reported rather
 than overwriting an earlier instance. Required properties and declared basic data
 types are checked before materialization.
 
+For database connectors, set `source_ref.source_kind="postgresql"` (or
+`"database"` / `"sql"`) and provide `record_key_fields` (or
+`primary_key_field`). Database lineage is blocked without a stable source key;
+the engine will not present an arbitrary SQL result row number as a durable record
+identity. File/in-memory sources may fall back to their row number.
+
 ### Relationship mappings
 
 A relationship contract uses `mapping_kind=join`, a target Relationship ID,
