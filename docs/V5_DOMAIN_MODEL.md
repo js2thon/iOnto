@@ -122,7 +122,7 @@ A property contract uses:
 - optional `transform.operations`, an ordered allow-list of deterministic operations.
 
 Supported operations: trim, lower, upper, to_string, to_integer, to_decimal,
-to_boolean, replace, map_values, date_iso, datetime_iso and regex_replace.
+to_boolean, replace, map_values, date_iso and datetime_iso.
 No Python, eval, script, SQL or arbitrary expression execution is permitted.
 
 A row is materialized only when an ObjectType identity can be resolved from its
