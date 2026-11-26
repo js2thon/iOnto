@@ -380,6 +380,33 @@ def execute_mapping(
             for target_instance_id in targets:
                 if target_instance_id not in instance.relationship_refs[relationship_id]:
                     instance.relationship_refs[relationship_id].append(target_instance_id)
+        # Enforce declared relationship endpoint cardinalities after join resolution.
+        outgoing_counts: Dict[str, int] = {}
+        incoming_counts: Dict[str, int] = {}
+        for instance in instances.values():
+            if instance.object_type_id != source_type_id:
+                continue
+            linked = instance.relationship_refs.get(relationship_id, [])
+            outgoing_counts[instance.id] = len(linked)
+            for target_instance_id in linked:
+                incoming_counts[target_instance_id] = incoming_counts.get(target_instance_id, 0) + 1
+        for source_instance_id, count in outgoing_counts.items():
+            if count < relation.source_min_cardinality or (
+                relation.source_max_cardinality is not None and count > relation.source_max_cardinality
+            ):
+                errors.append({
+                    "contract_id": contract.id, "instance_id": source_instance_id,
+                    "reason": f"关系源端基数不满足约束: {count}",
+                })
+        for target_instance_id, count in incoming_counts.items():
+            if count < relation.target_min_cardinality or (
+                relation.target_max_cardinality is not None and count > relation.target_max_cardinality
+            ):
+                errors.append({
+                    "contract_id": contract.id, "instance_id": target_instance_id,
+                    "reason": f"关系目标端基数不满足约束: {count}",
+                })
+
         # record join contract version on participating source instances
         for instance in instances.values():
             if instance.object_type_id == source_type_id:
