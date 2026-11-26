@@ -2339,9 +2339,9 @@ def _ontology_hash(ontology: Ontology) -> str:
 
 
 def _verify_roundtrip(ontology: Ontology) -> Optional[str]:
-    """round-trip 自检：export → from_dict → export，比对边集与对象计数。
+    """round-trip 自检：export → from_dict → export，比较完整快照内容。
 
-    返回错误描述；None 表示通过。小数据零成本，save/load 后各跑一次。
+    返回错误描述；None 表示通过。save/load 前后均执行。
     """
     try:
         data = ontology.snapshot_dict()
@@ -2363,7 +2363,7 @@ def _version_path(version_id: str) -> str:
         not version_id
         or version_id in {".", ".."}
         or os.path.basename(version_id) != version_id
-        or any(sep in version_id for sep in ("/", "\\\\"))
+        or any(sep in version_id for sep in ("/", chr(92)))
     ):
         raise ValueError("非法版本 ID")
     return os.path.join(VERSIONS_DIR, f"{version_id}.json")
