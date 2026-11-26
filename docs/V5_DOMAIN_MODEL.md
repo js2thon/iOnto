@@ -169,3 +169,45 @@ already loaded by the current connectors. It does not yet persist instances to a
 database, stream very large datasets, schedule incremental CDC, or replace the
 legacy `Ontology.add_objects` runtime. Those are integration/persistence work
 items for the next increment.
+
+
+## SQLite persistence and release bundles (V5.1 foundation)
+
+The optional `SQLiteOntologyRepository` stores V5 artifacts locally without Docker
+or third-party database packages:
+
+- `ontology_schemas`: versioned, checksummed schema snapshots;
+- `mapping_runs`: execution status, result summary and checksum;
+- `ontology_instances`: materialized business-object instances, scoped by ontology version;
+- `instance_lineage`: per-run lineage records;
+- `release_bundles`: immutable publication snapshots containing the schema,
+  mapping-run references and materialized instances.
+
+Default database path: `ontology_workspace/v5_ontology.db`.
+
+Example:
+
+```python
+from ontology_domain import SQLiteOntologyRepository
+
+repository = SQLiteOntologyRepository()
+repository.save_schema(schema)
+run_record = repository.save_mapping_run(schema, execute_mapping(schema, source_data))
+release = repository.publish_release(schema)
+```
+
+A schema must pass native validation before saving. Publishing additionally
+requires every MappingContract to be approved and active/released. A published
+ontology/version cannot be overwritten; create a new schema version for changes.
+The repository verifies SHA-256 checksums when loading schemas, runs and releases.
+
+This is the persistence foundation/API, not yet a Streamlit mapping-workbench
+integration. It is currently designed for a single-node local SQLite deployment;
+multi-process write contention, large-scale incremental ingestion, PostgreSQL
+repository support and UI workflow integration remain later tasks.
+
+Run persistence tests:
+
+```bash
+python -m unittest discover -s tests -p "test_ontology_sqlite_repository.py" -v
+```
