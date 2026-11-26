@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Ontology Studio V4.0
+iOnto V5.0
 企业本体建模 Pipeline 工作台
 
 功能：
@@ -58,7 +58,7 @@ except ImportError:
 # 页面配置与主题
 # ---------------------------------------------------------------------
 st.set_page_config(
-    page_title="Ontology Studio V4.0",
+    page_title="iOnto V5.0",
     page_icon="🕸️",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -2872,7 +2872,7 @@ def save_eval_run(run: Dict[str, Any]) -> None:
 # ---------------------------------------------------------------------
 # Streamlit 主界面（st.navigation 多页 + 页面函数）
 # ---------------------------------------------------------------------
-st.title("🕸️ Ontology Studio V4.0")
+st.title("🕸️ iOnto V5.0")
 st.caption(
     "企业本体建模 Pipeline 工作台 · 数据源 → 本体建模 → 智能问答 → "
     "问题测评 → 版本管理 · CSV/Excel · Schema/实例图谱 · LLM 问答 · "
