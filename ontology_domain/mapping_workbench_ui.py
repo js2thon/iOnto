@@ -93,6 +93,7 @@ def render_mapping_workbench() -> None:
             with st.form("v51_property_mapping_form"):
                 selections = {}
                 transforms = {}
+                target_types = {}
                 st.caption("同名字段仅作为界面默认建议；保存后仍是待审核契约，不会自动批准。")
                 for prop_id in obj.property_ids:
                     prop = schema.properties[prop_id]
@@ -110,13 +111,20 @@ def render_mapping_workbench() -> None:
                             f"{prop.label} · {prop.data_type}",
                             options,
                             index=index,
-                            key=f"v51_field_{object_id}_{prop_id}",
+                            key=f"v51_field_{object_id}_{source_table}_{prop_id}",
                         )
                     with c2:
                         transforms[prop_id] = st.selectbox(
                             "转换",
-                            ["无", "去除首尾空格", "转小写", "转大写", "转整数", "转小数", "转布尔"],
+                            ["无", "去除首尾空格", "转小写", "转大写", "转字符串", "转整数", "转小数", "转布尔"],
                             key=f"v51_transform_{object_id}_{prop_id}",
+                        )
+                    with st.container():
+                        target_types[prop_id] = st.selectbox(
+                            f"{prop.label} 目标数据类型",
+                            ["string", "integer", "decimal", "number", "boolean", "date", "datetime", "enum", "json"],
+                            index=["string", "integer", "decimal", "number", "boolean", "date", "datetime", "enum", "json"].index(prop.data_type) if prop.data_type in ["string", "integer", "decimal", "number", "boolean", "date", "datetime", "enum", "json"] else 0,
+                            key=f"v51_type_{object_id}_{prop_id}",
                         )
                 submitted = st.form_submit_button("保存为待审核映射")
             if submitted:
@@ -129,12 +137,14 @@ def render_mapping_workbench() -> None:
                         operations = {
                             "去除首尾空格": {"op": "trim"},
                             "转小写": {"op": "lower"},
+                            "转字符串": {"op": "to_string"},
                             "转大写": {"op": "upper"},
                             "转整数": {"op": "to_integer"},
                             "转小数": {"op": "to_decimal"},
                             "转布尔": {"op": "to_boolean"},
                         }
                         operation = operations.get(transform_name)
+                        editable.properties[prop_id].data_type = target_types[prop_id]
                         contract = build_property_contract(
                             editable,
                             object_type_id=object_id,
