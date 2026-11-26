@@ -9,7 +9,6 @@ from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 import json
-import re
 import uuid
 
 SCHEMA_VERSION = "5.0"
@@ -268,6 +267,8 @@ class OntologySchema:
         for rel in self.relationships.values():
             if rel.source_object_type_id not in self.object_types or rel.target_object_type_id not in self.object_types:
                 errors.append(f"Relationship {rel.id} references a missing ObjectType")
+            if rel.inverse_relationship_id and rel.inverse_relationship_id not in self.relationships:
+                errors.append(f"Relationship {rel.id} references missing inverse Relationship {rel.inverse_relationship_id}")
         for identity in self.identities.values():
             if identity.object_type_id not in self.object_types:
                 errors.append(f"Identity {identity.id} references a missing ObjectType")
@@ -281,6 +282,20 @@ class OntologySchema:
             for identity_id in obj.identity_ids:
                 if identity_id not in self.identities:
                     errors.append(f"ObjectType {obj.id} references missing Identity {identity_id}")
+            for relationship_id in obj.relationship_ids:
+                if relationship_id not in self.relationships:
+                    errors.append(f"ObjectType {obj.id} references missing Relationship {relationship_id}")
+        for contract in self.mapping_contracts.values():
+            target = contract.target_ref
+            for key, collection in (
+                ("object_type_id", self.object_types),
+                ("property_id", self.properties),
+                ("relationship_id", self.relationships),
+                ("identity_id", self.identities),
+            ):
+                target_id = target.get(key)
+                if target_id and target_id not in collection:
+                    errors.append(f"MappingContract {contract.id} references missing {key} {target_id}")
         return errors
 
     def to_dict(self) -> Dict[str, Any]:
