@@ -122,6 +122,12 @@ ontology_workspace/
 按你的项目需要自行约定。本仓库为工作台源码交付包。
 
 
+## 工程状态与整体 Review
+
+V5.0 当前已具备领域模型、实例/血缘模型和确定性映射执行服务，但映射画布、
+持久化和 V5 问答尚未完成端到端集成。已完成的代码审查、缺陷修复和剩余
+工程事项见 [V5 Overall Code Review](docs/OVERALL_CODE_REVIEW_V5.md)。
+
 ## V5 映射引擎快速使用（Python API）
 
 V5 映射引擎位于 `ontology_domain.mapping_engine`，面向已构建的

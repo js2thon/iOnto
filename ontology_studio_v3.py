@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Ontology Studio V4.0
+iOnto V5.0
 企业本体建模 Pipeline 工作台
 
 功能：
@@ -58,7 +58,7 @@ except ImportError:
 # 页面配置与主题
 # ---------------------------------------------------------------------
 st.set_page_config(
-    page_title="Ontology Studio V4.0",
+    page_title="iOnto V5.0",
     page_icon="🕸️",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -187,13 +187,19 @@ class Ontology:
             raise ValueError(f"ObjectType '{type_name}' 不存在")
         pk_field = self.object_types[type_name]["primary_key"]
 
-        for record in records:
+        for row_number, record in enumerate(records, start=1):
             clean = {str(k): json_safe(v) for k, v in record.items()}
             pk_value = clean.get(pk_field)
             if pk_value is None or str(pk_value).strip() == "":
-                continue
+                raise ValueError(
+                    f"对象类型 {type_name} 第 {row_number} 行主键 {pk_field} 为空；拒绝静默丢弃记录"
+                )
 
             key = str(pk_value)
+            if key in self.objects[type_name]:
+                raise ValueError(
+                    f"对象类型 {type_name} 存在重复主键 {key}；拒绝覆盖已有实例"
+                )
             self.objects[type_name][key] = clean
             self.links.add_node(
                 make_node_id(type_name, key),
@@ -255,7 +261,7 @@ class Ontology:
         pk_field = self.object_types[type_name]["primary_key"]
         clean = {str(k): json_safe(v) for k, v in data.items()}
         if clean.get(pk_field) is None or str(clean.get(pk_field)).strip() == "":
-            clean[pk_field] = str(uuid.uuid4())[:8]
+            raise ValueError(f"创建 {type_name} 失败：必须显式提供有效主键 {pk_field}")
 
         key = str(clean[pk_field])
         if key in self.objects[type_name]:
@@ -724,7 +730,9 @@ class AutoOntologyBuilder:
             if df[col].is_unique and df[col].notna().all():
                 return str(col)
 
-        return str(df.columns[0])
+        # No reliable single-column identity was found. The UI may let a user
+        # choose a key explicitly; the builder must never guess the first column.
+        return ""
 
     def from_dataframes(
         self,
@@ -747,11 +755,15 @@ class AutoOntologyBuilder:
                 continue
 
             pk = primary_keys.get(table_name) or self.infer_primary_key(df, table_name)
-            if pk not in df.columns:
-                pk = f"{table_name}_id"
-                df[pk] = [str(i) for i in range(1, len(df) + 1)]
+            if not pk or pk not in df.columns:
+                raise ValueError(
+                    f"数据表 {table_name} 无法自动识别可靠主键，请在本体建模配置中人工选择主键"
+                )
+            if df[pk].isna().any() or df[pk].astype(str).str.strip().eq("").any():
+                raise ValueError(f"数据表 {table_name} 主键列 {pk} 存在空值")
+            if df[pk].astype(str).duplicated().any():
+                raise ValueError(f"数据表 {table_name} 主键列 {pk} 存在重复值")
 
-            # 如果指定主键有空值或重复，仍允许导入非空记录，但给出质量提示
             actual_pks[table_name] = pk
             normalized_data[table_name] = df
 
@@ -2253,17 +2265,28 @@ def load_llm_config() -> Dict[str, str]:
             "base_url": str(data.get("base_url", "")),
             "model_name": str(data.get("model_name", "gpt-4o-mini")),
         }
-    except (OSError, json.JSONDecodeError):
+    except (OSError, json.JSONDecodeError, AttributeError, TypeError):
         return {"api_key": "", "base_url": "", "model_name": "gpt-4o-mini"}
 
 
 def save_llm_config(api_key: str, base_url: str, model_name: str) -> None:
     """将 LLM 配置保存到本地 llm_config.json。"""
-    with open(LLM_CONFIG_FILE, "w", encoding="utf-8") as f:
-        json.dump(
-            {"api_key": api_key, "base_url": base_url, "model_name": model_name},
-            f, ensure_ascii=False, indent=2,
-        )
+    directory = os.path.dirname(LLM_CONFIG_FILE) or "."
+    fd, tmp_path = tempfile.mkstemp(prefix=".llm-config-", suffix=".tmp", dir=directory)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(
+                {"api_key": api_key, "base_url": base_url, "model_name": model_name},
+                f, ensure_ascii=False, indent=2,
+            )
+            f.flush()
+            os.fsync(f.fileno())
+        # mkstemp creates owner-only permissions (0600 on POSIX); keep the API
+        # key out of partially written files and atomically replace the config.
+        os.replace(tmp_path, LLM_CONFIG_FILE)
+    finally:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 
 # ---------------------------------------------------------------------
@@ -2294,10 +2317,17 @@ def _atomic_write_json(path: str, data: Any, compact: bool = True) -> None:
         separators=(",", ":") if compact else None,
         default=str,
     )
-    tmp_path = path + ".tmp"
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        f.write(text)
-    os.replace(tmp_path, path)
+    directory = os.path.dirname(path) or "."
+    fd, tmp_path = tempfile.mkstemp(prefix=".iOnto-", suffix=".tmp", dir=directory)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+    finally:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 
 def _read_json(path: str) -> Optional[Any]:
@@ -2320,29 +2350,16 @@ def _ontology_hash(ontology: Ontology) -> str:
 
 
 def _verify_roundtrip(ontology: Ontology) -> Optional[str]:
-    """round-trip 自检：export → from_dict → export，比对边集与对象计数。
+    """round-trip 自检：export → from_dict → export，比较完整快照内容。
 
-    返回错误描述；None 表示通过。小数据零成本，save/load 后各跑一次。
+    返回错误描述；None 表示通过。save/load 前后均执行。
     """
     try:
         data = ontology.snapshot_dict()
         rebuilt = Ontology.from_dict(json.loads(json.dumps(data, default=str)))
-        edges_before = {
-            (u, v, str(k)) for u, v, k in ontology.links.edges(keys=True)
-        }
-        edges_after = {
-            (u, v, str(k)) for u, v, k in rebuilt.links.edges(keys=True)
-        }
-        if edges_before != edges_after:
-            return f"边集不一致：{len(edges_before)} → {len(edges_after)}"
-        for type_name in ontology.object_types:
-            count_before = len(ontology.objects.get(type_name, {}))
-            count_after = len(rebuilt.objects.get(type_name, {}))
-            if count_before != count_after:
-                return (
-                    f"类型 {type_name} 对象数不一致："
-                    f"{count_before} → {count_after}"
-                )
+        rebuilt_data = rebuilt.snapshot_dict()
+        if data != rebuilt_data:
+            return "快照 round-trip 后存在内容差异（Schema / 实例 / 关系 / 映射 / Action）"
         return None
     except Exception as exc:
         return f"round-trip 自检异常：{exc}"
@@ -2352,6 +2369,14 @@ def _verify_roundtrip(ontology: Ontology) -> Optional[str]:
 # 版本管理
 # ---------------------------------------------------------------------
 def _version_path(version_id: str) -> str:
+    version_id = str(version_id or "")
+    if (
+        not version_id
+        or version_id in {".", ".."}
+        or os.path.basename(version_id) != version_id
+        or any(sep in version_id for sep in ("/", chr(92)))
+    ):
+        raise ValueError("非法版本 ID")
     return os.path.join(VERSIONS_DIR, f"{version_id}.json")
 
 
@@ -2392,6 +2417,8 @@ def save_version(
 ) -> Tuple[str, Optional[str]]:
     """保存当前本体为版本快照；返回 (版本 ID, 自检错误)。"""
     _ensure_workspace()
+    if status not in VERSION_STATUS_FLOW:
+        return "", f"非法版本状态：{status}"
     error = _verify_roundtrip(ontology)
     if error:
         return "", error
@@ -2437,17 +2464,18 @@ def update_version_status(version_id: str, new_status: str) -> bool:
     data = _read_json(path)
     if not isinstance(data, dict):
         return False
+    if new_status not in VERSION_STATUS_FLOW:
+        return False
     meta = data.setdefault("meta", {})
     old_status = str(meta.get("status", "draft"))
-    if (
-        old_status in VERSION_STATUS_FLOW
-        and new_status in VERSION_STATUS_FLOW
-        and VERSION_STATUS_FLOW.index(new_status)
-        <= VERSION_STATUS_FLOW.index(old_status)
-    ):
-        # 只允许单向流转（或显式降级 deprecated）
-        if new_status != "deprecated":
-            return False
+    allowed = {
+        "draft": {"validated", "deprecated"},
+        "validated": {"released", "deprecated"},
+        "released": {"deprecated"},
+        "deprecated": set(),
+    }
+    if new_status not in allowed.get(old_status, set()):
+        return False
     meta["status"] = new_status
     _atomic_write_json(path, data, compact=True)
     return True
@@ -2844,7 +2872,7 @@ def save_eval_run(run: Dict[str, Any]) -> None:
 # ---------------------------------------------------------------------
 # Streamlit 主界面（st.navigation 多页 + 页面函数）
 # ---------------------------------------------------------------------
-st.title("🕸️ Ontology Studio V4.0")
+st.title("🕸️ iOnto V5.0")
 st.caption(
     "企业本体建模 Pipeline 工作台 · 数据源 → 本体建模 → 智能问答 → "
     "问题测评 → 版本管理 · CSV/Excel · Schema/实例图谱 · LLM 问答 · "

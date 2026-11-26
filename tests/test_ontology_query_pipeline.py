@@ -83,6 +83,7 @@ class OntologyQueryPipelineTests(unittest.TestCase):
         result = execute_query_plan(self.ontology, plan)
         self.assertEqual(result["records"][0]["node_id"], "Department:D1")
         self.assertEqual(len(result["relations"]), 1)
+        self.assertTrue(validate_result(self.ontology, plan, result)["valid"])
 
     def test_path_returns_relation_evidence(self):
         plan = _validate_plan({
@@ -93,6 +94,42 @@ class OntologyQueryPipelineTests(unittest.TestCase):
         result = execute_query_plan(self.ontology, plan)
         self.assertTrue(result["found"])
         self.assertEqual(result["length"], 1)
+        self.assertTrue(validate_result(self.ontology, plan, result)["valid"])
+
+    def test_path_relation_evidence_is_validated(self):
+        plan = _validate_plan({
+            "intent": "path", "source_type": "Employee", "source_pk": "E1",
+            "target_type_to": "Department", "target_pk": "D1",
+            "relation_type": "employee_to_department",
+        }, self.ontology)
+        result = execute_query_plan(self.ontology, plan)
+        result["relations"] = []
+        validation = validate_result(self.ontology, plan, result)
+        self.assertFalse(validation["valid"])
+        self.assertTrue(any("路径关系证据" in error for error in validation["errors"]))
+
+    def test_path_empty_result_fails_when_path_exists(self):
+        plan = _validate_plan({
+            "intent": "path", "source_type": "Employee", "source_pk": "E1",
+            "target_type_to": "Department", "target_pk": "D1",
+            "relation_type": "employee_to_department",
+        }, self.ontology)
+        result = execute_query_plan(self.ontology, plan)
+        result.update({"found": False, "path": [], "records": [], "relations": [], "length": 0})
+        validation = validate_result(self.ontology, plan, result)
+        self.assertFalse(validation["valid"])
+        self.assertTrue(any("独立计算" in error for error in validation["errors"]))
+
+    def test_neighbors_missing_edge_evidence_fails(self):
+        plan = _validate_plan({
+            "intent": "neighbors", "source_type": "Employee", "source_pk": "E1",
+            "relation_type": "employee_to_department", "direction": "out",
+        }, self.ontology)
+        result = execute_query_plan(self.ontology, plan)
+        result["relations"] = []
+        validation = validate_result(self.ontology, plan, result)
+        self.assertFalse(validation["valid"])
+        self.assertTrue(any("关系证据" in error for error in validation["errors"]))
 
     def test_unknown_property_is_rejected(self):
         with self.assertRaises(QueryPlanError):

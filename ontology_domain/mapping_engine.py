@@ -44,9 +44,8 @@ def apply_transform(value: Any, spec: Optional[Dict[str, Any]]) -> Any:
         return value
     if not isinstance(spec, dict):
         raise MappingExecutionError("transform 必须是 JSON 对象")
-    forbidden = {"python", "code", "script", "eval", "expression"}
-    if forbidden.intersection(spec):
-        raise MappingExecutionError("transform 不允许执行代码或任意表达式")
+    if set(spec) - {"operations"}:
+        raise MappingExecutionError("transform 仅允许 operations 字段")
     operations = spec.get("operations", [])
     if not isinstance(operations, list):
         raise MappingExecutionError("transform.operations 必须是数组")
@@ -101,6 +100,18 @@ def _source_id(contract: MappingContract) -> str:
     return str(contract.source_ref.get("source_id") or _contract_source_table(contract) or "source:unknown")
 
 
+def _record_key(row: Dict[str, Any], source_ref: Dict[str, Any], row_number: int) -> Dict[str, Any]:
+    fields = source_ref.get("record_key_fields") or source_ref.get("primary_key_field") or []
+    if isinstance(fields, str):
+        fields = [fields]
+    if fields:
+        if all(field in row and row.get(field) is not None for field in fields):
+            return {str(field): row[field] for field in fields}
+        if str(source_ref.get("source_kind") or "").lower() in {"database", "postgresql", "sql"}:
+            raise ValueError("数据库记录缺少配置的稳定主键字段值")
+    return {"row_number": row_number}
+
+
 def _validate_property_value(prop: Any, value: Any) -> None:
     if value is None:
         if prop.required or not prop.nullable:
@@ -137,9 +148,13 @@ def _validate_property_value(prop: Any, value: Any) -> None:
         raise ValueError(f"属性 {prop.name} 的值与声明类型 {kind} 不匹配")
 
 
-def _identity_for(schema: OntologySchema, object_type_id: str, values: Dict[str, Any]):
+def _identity_for(
+    schema: OntologySchema, object_type_id: str, values: Dict[str, Any],
+    identity_refs: Optional[List[str]] = None,
+):
     obj = schema.object_types[object_type_id]
-    for identity_id in obj.identity_ids:
+    candidate_ids = identity_refs or obj.identity_ids
+    for identity_id in candidate_ids:
         identity = schema.identities.get(identity_id)
         if identity and all(prop in values and values[prop] not in (None, "") for prop in identity.property_refs):
             return identity
@@ -162,6 +177,25 @@ def _validate_contracts(schema: OntologySchema) -> Tuple[List[MappingContract], 
             contract.validate()
         except ValueError as exc:
             blocked.append({"contract_id": contract.id, "reason": str(exc)})
+            continue
+        database_kinds = {"database", "postgresql", "sql"}
+        source_is_database = str(contract.source_ref.get("source_kind") or "").lower() in database_kinds
+        target_is_database = str(contract.target_ref.get("source_kind") or "").lower() in database_kinds
+        if source_is_database and not (
+            contract.source_ref.get("record_key_fields") or contract.source_ref.get("primary_key_field")
+        ):
+            blocked.append({
+                "contract_id": contract.id,
+                "reason": "数据库来源映射必须配置 record_key_fields/primary_key_field，不能用不稳定的结果行号作为记录身份",
+            })
+            continue
+        if target_is_database and not (
+            contract.target_ref.get("record_key_fields") or contract.target_ref.get("primary_key_field")
+        ):
+            blocked.append({
+                "contract_id": contract.id,
+                "reason": "数据库目标数据集必须配置 target_ref.record_key_fields/primary_key_field",
+            })
             continue
         if contract.review_status != "approved" or contract.status not in {"active", "released"}:
             blocked.append({
@@ -197,6 +231,9 @@ def execute_mapping(
     for contract in runnable:
         target = contract.target_ref
         if target.get("property_id"):
+            if contract.mapping_kind not in {"direct", "transform"}:
+                blocked.append({"contract_id": contract.id, "reason": f"属性映射暂不支持 mapping_kind={contract.mapping_kind}"})
+                continue
             object_type_id = str(target.get("object_type_id") or "")
             property_id = str(target.get("property_id") or "")
             prop = schema.properties.get(property_id)
@@ -209,9 +246,15 @@ def execute_mapping(
             else:
                 property_contracts.setdefault(object_type_id, []).append(contract)
         elif target.get("relationship_id"):
+            if contract.mapping_kind != "join":
+                blocked.append({"contract_id": contract.id, "reason": "关系映射必须使用 mapping_kind=join"})
+                continue
             relationship_contracts.append(contract)
         else:
             blocked.append({"contract_id": contract.id, "reason": "target_ref 必须指定 property_id 或 relationship_id"})
+
+    if not property_contracts and not relationship_contracts and not blocked:
+        blocked.append({"reason": "当前本体没有可执行的映射契约"})
 
     instances: Dict[str, OntologyInstance] = {}
     row_instance_ids: Dict[Tuple[str, int, str], str] = {}
@@ -226,6 +269,11 @@ def execute_mapping(
             by_table.setdefault(table, []).append(contract)
         for table, table_contracts in by_table.items():
             rows = source_data.get(table)
+            record_locator_ref = next(
+                (c.source_ref for c in table_contracts
+                 if c.source_ref.get("record_key_fields") or c.source_ref.get("primary_key_field")),
+                table_contracts[0].source_ref,
+            )
             if rows is None:
                 errors.append({"table": table, "object_type_id": object_type_id, "reason": "数据源中不存在映射契约指定的数据集"})
                 continue
@@ -270,7 +318,7 @@ def execute_mapping(
                         source = SourceRecordRef(
                             source_id=_source_id(contract), dataset=contract.source_ref.get("dataset"),
                             table=contract.source_ref.get("table") or table,
-                            record_key={"row_number": row_index}, row_number=row_index,
+                            record_key=_record_key(row, record_locator_ref, row_index), row_number=row_index,
                             source_version=contract.source_schema_hash,
                         )
                         field_traces.append(FieldLineage(
@@ -298,7 +346,12 @@ def execute_mapping(
                         "reason": "缺少必填属性: " + ", ".join(missing_required),
                     })
                     continue
-                identity = _identity_for(schema, object_type_id, values)
+                contract_identity_refs = list(dict.fromkeys(
+                    identity_id for contract in table_contracts for identity_id in contract.identity_refs
+                ))
+                identity = _identity_for(
+                    schema, object_type_id, values, contract_identity_refs or None
+                )
                 if identity is None:
                     errors.append({"table": table, "row": row_index, "object_type_id": object_type_id, "reason": "无法从已映射属性解析有效业务身份"})
                     continue
@@ -311,8 +364,10 @@ def execute_mapping(
                     mapping_versions={c.id: c.version for c in table_contracts},
                     lineage=SourceLineage(
                         sources=[SourceRecordRef(
-                            source_id=str(next((_source_id(c) for c in table_contracts), table)),
-                            dataset=table, table=table, record_key={"row_number": row_index},
+                            source_id=str(record_locator_ref.get("source_id") or table),
+                            dataset=table, table=table, record_key=_record_key(
+                                rows[row_index - 1], record_locator_ref, row_index
+                            ),
                             row_number=row_index,
                         )],
                         fields=field_traces, mapping_run_id=run_id,
@@ -394,12 +449,14 @@ def execute_mapping(
                     relationship_id=relationship_id,
                     source=SourceRecordRef(
                         source_id=_source_id(contract), dataset=source_table, table=source_table,
-                        record_key={"row_number": idx}, row_number=idx,
+                        record_key=_record_key(row, contract.source_ref, idx), row_number=idx,
                     ),
                     target=SourceRecordRef(
                         source_id=str(contract.target_ref.get("source_id") or target_table),
                         dataset=target_table, table=target_table,
-                        record_key={"row_number": target_row}, row_number=target_row,
+                        record_key=_record_key(
+                            target_rows[target_row - 1], contract.target_ref, target_row
+                        ), row_number=target_row,
                     ),
                     mapping_contract_id=contract.id,
                     mapping_contract_version=contract.version,
