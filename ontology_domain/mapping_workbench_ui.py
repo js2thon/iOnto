@@ -345,39 +345,39 @@ def render_mapping_workbench() -> None:
             runs = repository.list_mapping_runs(schema.ontology_id, schema.version, limit=30)
             if runs:
                 st.dataframe(pd.DataFrame(runs), use_container_width=True, hide_index=True)
+                selected_run_id = st.selectbox(
+                    "选择运行查看结果与血缘",
+                    [item["run_id"] for item in runs],
+                    key="v51_persisted_run_select",
+                )
+                persisted_run = repository.load_mapping_run(selected_run_id)
+                st.json({
+                    "run_id": selected_run_id,
+                    "status": persisted_run.get("status"),
+                    "instance_count": persisted_run.get("instance_count"),
+                    "mapped_rows": persisted_run.get("mapped_rows"),
+                    "errors": len(persisted_run.get("errors", [])),
+                    "blocked_contracts": len(persisted_run.get("blocked_contracts", [])),
+                    "checksum": persisted_run.get("checksum"),
+                })
+                if persisted_run.get("errors"):
+                    st.dataframe(pd.DataFrame(persisted_run["errors"]), use_container_width=True)
+                persisted_instances = persisted_run.get("instances") or {}
+                if persisted_instances:
+                    instance_ids = list(persisted_instances)
+                    selected_instance = st.selectbox("查看实例血缘", instance_ids, key="v51_lineage_instance")
+                    instance = persisted_instances[selected_instance]
+                    st.json({
+                        "instance_id": instance.get("id"),
+                        "object_type_id": instance.get("object_type_id"),
+                        "properties": instance.get("properties"),
+                        "identity_values": instance.get("identity_values"),
+                        "field_lineage": (instance.get("lineage") or {}).get("fields", []),
+                        "relationship_lineage": (instance.get("lineage") or {}).get("relationships", []),
+                    })
+                    st.markdown("**按实例查询的持久化血缘记录**")
+                    st.json(repository.get_lineage(schema.ontology_id, schema.version, selected_instance))
             else:
                 st.info("当前本体版本尚无映射运行记录。")
         except Exception as exc:
-            st.error(f"读取运行历史失败：{exc}")
-        last_run = st.session_state.get("v5_mapping_last_run")
-        if last_run:
-            result = last_run["result"]
-            st.markdown("**最近一次执行结果**")
-            st.json({
-                "success": result.get("success"),
-                "run_id": result.get("run_id"),
-                "instance_count": result.get("instance_count"),
-                "mapped_rows": result.get("mapped_rows"),
-                "errors": len(result.get("errors", [])),
-                "blocked_contracts": len(result.get("blocked_contracts", [])),
-            })
-            if result.get("errors"):
-                st.dataframe(pd.DataFrame(result["errors"]), use_container_width=True)
-            if result.get("instances"):
-                instance_ids = list(result["instances"])
-                selected_instance = st.selectbox("查看实例血缘", instance_ids, key="v51_lineage_instance")
-                instance = result["instances"][selected_instance]
-                st.json({
-                    "instance_id": instance.id,
-                    "properties": instance.properties,
-                    "field_lineage": [
-                        {"property_id": item.property_id, "source": item.source.__dict__, "source_field": item.source_field,
-                         "mapping_contract_id": item.mapping_contract_id, "source_value_hash": item.source_value_hash}
-                        for item in instance.lineage.fields
-                    ],
-                    "relationship_lineage": [
-                        {"relationship_id": item.relationship_id, "source": item.source.__dict__, "target": item.target.__dict__,
-                         "mapping_contract_id": item.mapping_contract_id}
-                        for item in instance.lineage.relationships
-                    ],
-                })
+            st.error(f"读取运行历史或血缘失败：{exc}")

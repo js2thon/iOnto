@@ -9,6 +9,7 @@ from ontology_domain.mapping_workbench import (
     legacy_ontology_to_schema,
     load_latest_schema,
     preview_mapping,
+    next_editable_version,
 )
 from ontology_domain.sqlite_repository import SQLiteOntologyRepository
 
@@ -57,6 +58,31 @@ class MappingWorkbenchServiceTests(unittest.TestCase):
         self.assertTrue(result["success"])
         self.assertEqual(2, result["instance_count"])
         self.assertTrue(all(c.review_status == "pending" for c in self.schema.mapping_contracts.values()))
+
+    def test_new_draft_version_is_created_after_mapping_run(self):
+        self.add_contracts()
+        with tempfile.TemporaryDirectory() as directory:
+            repository = SQLiteOntologyRepository(Path(directory) / "v5.db")
+            execute_and_persist(self.schema, self.rows, repository)
+            draft = next_editable_version(self.schema, repository)
+            self.assertEqual(self.schema.version + 1, draft.version)
+            self.assertEqual(self.schema.version, draft.metadata["parent_version"])
+
+    def test_preview_does_not_override_rejected_contracts(self):
+        contract = build_property_contract(
+            self.schema,
+            object_type_id=self.object_id,
+            property_id=self.properties["employee_id"],
+            source_table="employees",
+            source_field="employee_id",
+            record_key_fields=["employee_id"],
+        )
+        contract.review_status = "rejected"
+        self.schema.mapping_contracts[contract.id] = contract
+        result = preview_mapping(self.schema, self.rows)
+        self.assertFalse(result["success"])
+        self.assertTrue(result["blocked_contracts"])
+        self.assertEqual("rejected", self.schema.mapping_contracts[contract.id].review_status)
 
     def test_latest_persisted_schema_is_restored(self):
         legacy = SimpleNamespace(

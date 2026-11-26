@@ -223,7 +223,7 @@ The navigation page **映射工作台** bridges the current data-source session 
 - Saved contracts start as `pending/draft`. A user must explicitly approve them before the production execution action is enabled.
 - Preview executes a deep copy with temporary approval and does not change the persisted contract review state.
 - Production execution persists the schema snapshot, mapping run, materialized instances and field/relationship lineage to SQLite. Run history is queryable by ontology/version.
-- Release publication uses the existing checksum and immutable-version gate. Editing a released version creates a new draft version instead of mutating the release.
+- Release publication uses the existing checksum and immutable-version gate. Once a version has a persisted mapping run or release, edits create a new draft version; a version that has materialized runs cannot be overwritten.
 
 Default database: `ontology_workspace/v5_ontology.db`. No Docker or additional third-party dependency is introduced.
 

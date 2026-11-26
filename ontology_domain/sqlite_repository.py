@@ -143,6 +143,19 @@ class SQLiteOntologyRepository:
             ).fetchone()
             if released:
                 raise RepositoryError("This ontology version is already released and immutable")
+            existing = db.execute(
+                "SELECT schema_json FROM ontology_schemas WHERE ontology_id=? AND version=?",
+                (schema.ontology_id, schema.version),
+            ).fetchone()
+            if existing and existing["schema_json"] != payload:
+                runs = db.execute(
+                    "SELECT 1 FROM mapping_runs WHERE ontology_id=? AND ontology_version=? LIMIT 1",
+                    (schema.ontology_id, schema.version),
+                ).fetchone()
+                if runs:
+                    raise RepositoryError(
+                        "This ontology version already has mapping runs; create a new version instead of overwriting its Schema"
+                    )
             db.execute("""
                 INSERT INTO ontology_schemas
                     (ontology_id, version, schema_json, checksum, created_at, updated_at)

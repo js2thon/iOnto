@@ -2943,6 +2943,13 @@ with st.sidebar:
         st.session_state.messages_v2 = []
         st.session_state.pk_config = {}
         st.session_state.manual_links_config = []
+        st.session_state.source_kinds_v2 = {}
+        for state_key in (
+            "v5_mapping_schema", "v5_mapping_source_fingerprint",
+            "v5_mapping_source_changed", "v5_mapping_preview",
+            "v5_mapping_last_run", "v5_mapping_last_release",
+        ):
+            st.session_state.pop(state_key, None)
         st.rerun()
 
 
@@ -3068,6 +3075,8 @@ def _commit_raw_data(
     """
     st.session_state.raw_data_v2 = preview_data or {}
     st.session_state.source_kinds_v2 = {str(name): source_kind for name in (preview_data or {})}
+    st.session_state.pop("v5_mapping_preview", None)
+    st.session_state.pop("v5_mapping_last_run", None)
     st.session_state.messages_v2 = []
     st.session_state.manual_links_config = []
     st.session_state.pk_config = {}
