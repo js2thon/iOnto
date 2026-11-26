@@ -6,10 +6,12 @@ from .models import (
 from .legacy_adapter import legacy_snapshot_to_v5
 from .instances import FieldLineage, OntologyInstance, RelationshipLineage, SourceLineage, SourceRecordRef
 from .mapping_engine import MappingExecutionError, apply_transform, execute_mapping
+from .sqlite_repository import RepositoryError, SQLiteOntologyRepository
 
 __all__ = [
     "SCHEMA_VERSION", "Constraint", "Identity", "MappingContract", "ObjectType",
     "OntologySchema", "Property", "Relationship", "SemanticTerms", "new_id",
     "legacy_snapshot_to_v5", "FieldLineage", "OntologyInstance", "SourceLineage",
     "SourceRecordRef", "RelationshipLineage", "MappingExecutionError", "apply_transform", "execute_mapping",
+    "RepositoryError", "SQLiteOntologyRepository",
 ]

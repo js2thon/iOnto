@@ -7,6 +7,7 @@ on:
       - "tests/test_ontology_domain_models.py"
       - "tests/test_ontology_instance_lineage.py"
       - "tests/test_ontology_mapping_engine.py"
+      - "tests/test_ontology_sqlite_repository.py"
       - ".github/workflows/v5-domain-model.yml"
   push:
     branches: [main]
@@ -30,3 +31,4 @@ jobs:
           python -m unittest discover -s tests -p "test_ontology_domain_models.py" -v
           python -m unittest discover -s tests -p "test_ontology_instance_lineage.py" -v
           python -m unittest discover -s tests -p "test_ontology_mapping_engine.py" -v
+          python -m unittest discover -s tests -p "test_ontology_sqlite_repository.py" -v
