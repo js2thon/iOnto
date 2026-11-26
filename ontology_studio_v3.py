@@ -2265,17 +2265,28 @@ def load_llm_config() -> Dict[str, str]:
             "base_url": str(data.get("base_url", "")),
             "model_name": str(data.get("model_name", "gpt-4o-mini")),
         }
-    except (OSError, json.JSONDecodeError):
+    except (OSError, json.JSONDecodeError, AttributeError, TypeError):
         return {"api_key": "", "base_url": "", "model_name": "gpt-4o-mini"}
 
 
 def save_llm_config(api_key: str, base_url: str, model_name: str) -> None:
     """将 LLM 配置保存到本地 llm_config.json。"""
-    with open(LLM_CONFIG_FILE, "w", encoding="utf-8") as f:
-        json.dump(
-            {"api_key": api_key, "base_url": base_url, "model_name": model_name},
-            f, ensure_ascii=False, indent=2,
-        )
+    directory = os.path.dirname(LLM_CONFIG_FILE) or "."
+    fd, tmp_path = tempfile.mkstemp(prefix=".llm-config-", suffix=".tmp", dir=directory)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(
+                {"api_key": api_key, "base_url": base_url, "model_name": model_name},
+                f, ensure_ascii=False, indent=2,
+            )
+            f.flush()
+            os.fsync(f.fileno())
+        # mkstemp creates owner-only permissions (0600 on POSIX); keep the API
+        # key out of partially written files and atomically replace the config.
+        os.replace(tmp_path, LLM_CONFIG_FILE)
+    finally:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 
 # ---------------------------------------------------------------------
