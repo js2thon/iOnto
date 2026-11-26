@@ -151,7 +151,10 @@ also pass.
 
 Each mapped property receives a `FieldLineage` entry containing source table,
 row locator, source field, source-value hash, mapping contract ID/version and
-available evidence. Raw source values are not copied into lineage metadata.
+available evidence. Each materialized relationship edge receives a
+`RelationshipLineage` entry containing both endpoint source locators, the join
+contract/version and a hash of the join-key values. Raw source values are not
+copied into lineage metadata.
 
 ### Scope boundary
 
