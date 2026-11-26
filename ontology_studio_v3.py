@@ -16,9 +16,9 @@ Ontology Studio V4.0
 - 关系质量检查：悬空外键、孤立节点、重复关系等
 - 对象 Action：创建、更新、删除
 - LLM 问答（可选，支持 OpenAI 兼容接口）
-  · 默认 Tool Calling：按需 search/get/neighbors/path/count，不全量塞上下文
-  · 降级：智能检索 / 抽样 / 全量（有上限）
-  · 证据溯源：记录每次问答的工具调用轨迹
+  · LLM 仅负责问题理解与最终表达，不直接调用数据工具
+  · 结构化查询计划 → 本体确定性执行 → 结果校验 → 证据链
+  · 查询计划、执行结果、校验报告与证据链均可追溯
 - 问题测评：CQ 问题集管理、自动测评、确定性比对、失败归因
 - 版本管理：版本快照、差异比较、生命周期、回滚
 - JSON / OWL 导出
@@ -44,6 +44,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import networkx as nx
 import pandas as pd
 import streamlit as st
+from ontology_query_pipeline import execute_query_pipeline
 from pyvis.network import Network
 from rdflib import Graph, Literal, Namespace, OWL, RDF, RDFS, URIRef
 
@@ -3881,10 +3882,8 @@ def render_qa() -> None:
 
     st.subheader("基于本体的智能问答")
     st.caption(
-        "默认「工具调用」：模型只看到 Schema，通过 "
-        "search_objects / get_object / get_neighbors / find_path / "
-        "count_objects 按需查询实例，避免全量加载导致失败。"
-        "每次回答附带工具调用轨迹（证据溯源）。"
+        "LLM 负责语义理解和最终表达；查询规划器生成结构化计划，"
+        "本体执行引擎确定性查询，校验器验证结果，溯源引擎生成证据链。"
     )
 
     # 当前版本标签
@@ -3932,84 +3931,47 @@ def render_qa() -> None:
         with st.chat_message("user"):
             st.markdown(question)
 
-        use_tools = context_limit_mode.startswith("工具调用")
-        if context_limit_mode.startswith("智能检索"):
-            context_mode = "retrieve"
-            max_objects = 30
-        elif "50" in context_limit_mode:
-            context_mode = "sample"
-            max_objects = 50
-        elif "100" in context_limit_mode:
-            context_mode = "sample"
-            max_objects = 100
-        elif context_limit_mode.startswith("全部"):
-            context_mode = "full"
-            max_objects = None
-        else:
-            context_mode = "retrieve"
-            max_objects = 30
-
+        # 所有问答统一走确定性本体查询 Pipeline；不再提供直接上下文问答旁路。
         with st.chat_message("assistant"):
             status_box = st.empty()
             answer_box = st.empty()
             answer_parts: List[str] = []
             structured_trace: List[Dict[str, Any]] = []
-
-            if use_tools:
-                status_box.caption("工具调用模式：准备查询本体…")
-                tool_trace: List[str] = []
-                for event_type, payload in ask_llm_with_tools(
-                    question,
-                    ontology,
-                    api_key,
-                    base_url,
-                    model_name,
-                ):
-                    if event_type == "status":
-                        tool_trace.append(payload)
-                        status_box.caption(" → ".join(tool_trace[-4:]))
-                    elif event_type == "tool":
-                        structured_trace.append(payload)
-                    elif event_type == "token":
-                        answer_parts.append(payload)
-                        answer_box.markdown("".join(answer_parts))
-                    elif event_type == "error":
-                        answer_parts.append(payload)
-                        answer_box.error(payload)
-                status_box.empty()
-                if answer_parts:
-                    answer_box.markdown("".join(answer_parts))
-            else:
-                mode_label = {
-                    "retrieve": "智能检索相关实体",
-                    "sample": f"抽样（每类最多 {max_objects} 条）",
-                    "full": "尽量全量（受字符上限约束）",
-                }.get(context_mode, context_mode)
-                status_box.caption(
-                    f"降级模式：{mode_label}，正在生成回答…"
+            status_box.caption("正在理解问题并生成结构化本体查询计划…")
+            try:
+                if not api_key:
+                    raise RuntimeError("请先配置 LLM API Key。")
+                if OpenAI is None:
+                    raise RuntimeError("缺少 openai 依赖，请执行：pip install openai")
+                client = _make_llm_client(api_key, base_url)
+                pipeline_result = execute_query_pipeline(
+                    client, model_name, question, ontology,
+                    version_id=pointer.get("version_id") if pointer else None,
                 )
+                structured_trace = pipeline_result.get("trace", [])
+                answer = pipeline_result.get("answer", "")
+                validation = pipeline_result.get("validation", {})
+                if not validation.get("valid", False):
+                    answer_box.error(answer)
+                else:
+                    answer_box.markdown(answer)
+                answer_parts.append(answer)
+                status_box.caption(
+                    "查询计划已生成 → 本体查询已执行 → "
+                    + ("结果校验通过" if validation.get("valid") else "结果校验未通过")
+                    + " → 证据链已生成"
+                )
+            except Exception as exc:
+                answer = f"本体查询 Pipeline 执行失败：{_friendly_llm_error(exc)}"
+                answer_parts.append(answer)
+                answer_box.error(answer)
+                structured_trace.append({
+                    "name": "pipeline_error", "args": {},
+                    "result": str(exc),
+                })
+            finally:
+                status_box.empty()
 
-                def _stream_answer():
-                    first = True
-                    for part in ask_llm_stream(
-                        question,
-                        ontology,
-                        api_key,
-                        base_url,
-                        model_name,
-                        max_objects=max_objects,
-                        context_mode=context_mode,
-                    ):
-                        if first:
-                            status_box.empty()
-                            first = False
-                        answer_parts.append(part)
-                        yield part
-                    status_box.empty()
-
-                st.write_stream(_stream_answer())
-
-            answer = "".join(answer_parts)
 
         st.session_state.messages_v2.append({
             "role": "assistant",
