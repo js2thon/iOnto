@@ -50,7 +50,7 @@ def ontology_schema(ontology: Any) -> Dict[str, Any]:
 def _json_object(text: str) -> Dict[str, Any]:
     text = (text or "").strip()
     if text.startswith("```"):
-        text = re.sub(r"^\`\`\`(?:json)?\s*|\s*\`\`\`$", "", text, flags=re.I)
+        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.I)
     data = json.loads(text)
     if not isinstance(data, dict):
         raise QueryPlanError("模型返回的查询计划必须是 JSON 对象")
