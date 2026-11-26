@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
 
@@ -54,12 +55,20 @@ class SQLiteOntologyRepository:
             Path(self.database_path).expanduser().parent.mkdir(parents=True, exist_ok=True)
         self.initialize()
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self):
         connection = sqlite3.connect(self.database_path, timeout=self.timeout)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
         connection.execute("PRAGMA busy_timeout = 10000")
-        return connection
+        try:
+            yield connection
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
 
     def initialize(self) -> None:
         with self._connect() as db:
