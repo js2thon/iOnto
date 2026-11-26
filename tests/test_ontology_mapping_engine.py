@@ -34,7 +34,7 @@ class MappingContractEngineTests(unittest.TestCase):
         relation = Relationship(
             id="r:employee-dept", name="belongs_to", label="所属部门",
             source_object_type_id=employee.id, target_object_type_id=department.id,
-            target_max_cardinality=1,
+            # Default multiplicity allows many employees to belong to one department.
         )
         employee.property_ids = ["p:employee-id", "p:name", "p:dept-code"]
         employee.identity_ids = [identity_employee.id]
@@ -131,6 +131,47 @@ class MappingContractEngineTests(unittest.TestCase):
         self.assertFalse(result["success"])
         self.assertEqual(1, result["instance_count"])
         self.assertTrue(any("拒绝覆盖" in item["reason"] for item in result["errors"]))
+
+    def test_property_type_mismatch_is_reported(self):
+        schema = self.make_schema()
+        schema.properties["p:employee-id"].data_type = "integer"
+        self.add_property_contract(schema, "m:eid", "employee", "emp_no", "ot:employee", "p:employee-id")
+        self.add_property_contract(schema, "m:name", "employee", "name", "ot:employee", "p:name")
+        result = execute_mapping(schema, {"employee": [{"emp_no": "E1", "name": "Alice"}]})
+        self.assertFalse(result["success"])
+        self.assertTrue(any("类型 integer" in item["reason"] for item in result["errors"]))
+
+    def test_required_property_is_enforced(self):
+        schema = self.make_schema()
+        self.add_property_contract(schema, "m:eid", "employee", "emp_no", "ot:employee", "p:employee-id")
+        result = execute_mapping(schema, {"employee": [{"emp_no": "E1"}]})
+        self.assertFalse(result["success"])
+        self.assertTrue(any("缺少必填属性" in item["reason"] for item in result["errors"]))
+
+    def test_many_source_instances_can_share_target_instance(self):
+        schema = self.make_schema()
+        self.add_property_contract(schema, "m:eid", "employee", "emp_no", "ot:employee", "p:employee-id")
+        self.add_property_contract(schema, "m:name", "employee", "name", "ot:employee", "p:name")
+        self.add_property_contract(schema, "m:did", "department", "dept_no", "ot:department", "p:department-id")
+        schema.mapping_contracts["m:join"] = MappingContract(
+            id="m:join", name="join",
+            source_ref={"table": "employee"},
+            target_ref={"relationship_id": "r:employee-dept", "target_table": "department"},
+            mapping_kind="join", join_keys=[{"source_field": "dept_code", "target_field": "code"}],
+            review_status="approved", status="active",
+        )
+        result = execute_mapping(schema, {
+            "employee": [
+                {"emp_no": "E1", "name": "Alice", "dept_code": "D1"},
+                {"emp_no": "E2", "name": "Bob", "dept_code": "D1"},
+            ],
+            "department": [{"dept_no": "D1", "code": "D1"}],
+        })
+        self.assertTrue(result["success"], result["errors"])
+        employees = [v for v in result["instances"].values() if v.object_type_id == "ot:employee"]
+        department = next(v for v in result["instances"].values() if v.object_type_id == "ot:department")
+        self.assertEqual(2, len(employees))
+        self.assertTrue(all(v.relationship_refs["r:employee-dept"] == [department.id] for v in employees))
 
     def test_transform_allow_list_rejects_code(self):
         with self.assertRaises(ValueError):
