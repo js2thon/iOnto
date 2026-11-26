@@ -166,6 +166,15 @@ def _validate_contracts(schema: OntologySchema) -> Tuple[List[MappingContract], 
         except ValueError as exc:
             blocked.append({"contract_id": contract.id, "reason": str(exc)})
             continue
+        if (
+            str(contract.source_ref.get("source_kind") or "").lower() in {"database", "postgresql", "sql"}
+            and not (contract.source_ref.get("record_key_fields") or contract.source_ref.get("primary_key_field"))
+        ):
+            blocked.append({
+                "contract_id": contract.id,
+                "reason": "数据库来源映射必须配置 record_key_fields/primary_key_field，不能用不稳定的结果行号作为记录身份",
+            })
+            continue
         if contract.review_status != "approved" or contract.status not in {"active", "released"}:
             blocked.append({
                 "contract_id": contract.id,
@@ -282,7 +291,7 @@ def execute_mapping(
                         source = SourceRecordRef(
                             source_id=_source_id(contract), dataset=contract.source_ref.get("dataset"),
                             table=contract.source_ref.get("table") or table,
-                            record_key={"row_number": row_index}, row_number=row_index,
+                            record_key=_record_key(row, contract.source_ref, row_index), row_number=row_index,
                             source_version=contract.source_schema_hash,
                         )
                         field_traces.append(FieldLineage(
@@ -329,7 +338,9 @@ def execute_mapping(
                     lineage=SourceLineage(
                         sources=[SourceRecordRef(
                             source_id=str(next((_source_id(c) for c in table_contracts), table)),
-                            dataset=table, table=table, record_key={"row_number": row_index},
+                            dataset=table, table=table, record_key=_record_key(
+                                rows[row_index - 1], table_contracts[0].source_ref, row_index
+                            ),
                             row_number=row_index,
                         )],
                         fields=field_traces, mapping_run_id=run_id,
@@ -411,12 +422,14 @@ def execute_mapping(
                     relationship_id=relationship_id,
                     source=SourceRecordRef(
                         source_id=_source_id(contract), dataset=source_table, table=source_table,
-                        record_key={"row_number": idx}, row_number=idx,
+                        record_key=_record_key(row, contract.source_ref, idx), row_number=idx,
                     ),
                     target=SourceRecordRef(
                         source_id=str(contract.target_ref.get("source_id") or target_table),
                         dataset=target_table, table=target_table,
-                        record_key={"row_number": target_row}, row_number=target_row,
+                        record_key=_record_key(
+                            target_rows[target_row - 1], contract.target_ref, target_row
+                        ), row_number=target_row,
                     ),
                     mapping_contract_id=contract.id,
                     mapping_contract_version=contract.version,
