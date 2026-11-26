@@ -105,3 +105,58 @@ Tests:
 ```bash
 python -m unittest discover -s tests -p "test_ontology_instance_lineage.py" -v
 ```
+
+
+## Deterministic MappingContract execution
+
+`ontology_domain.mapping_engine.execute_mapping(schema, source_data, run_id=None)`
+executes approved/active contracts and returns a run result containing materialized
+`OntologyInstance` objects, contract versions, blocked contracts and row-level errors.
+
+### Property mappings
+
+A property contract uses:
+- `source_ref.table` (or `dataset`) and `source_ref.field` (or `column`);
+- `target_ref.object_type_id` and `target_ref.property_id`;
+- `mapping_kind=direct` or `transform`;
+- optional `transform.operations`, an ordered allow-list of deterministic operations.
+
+Supported operations: trim, lower, upper, to_string, to_integer, to_decimal,
+to_boolean, replace, map_values, date_iso, datetime_iso and regex_replace.
+No Python, eval, script, SQL or arbitrary expression execution is permitted.
+
+A row is materialized only when an ObjectType identity can be resolved from its
+mapped properties. IDs are deterministic hashes of the ObjectType ID and identity
+values. Duplicate identity rows with conflicting properties are reported rather
+than overwriting an earlier instance. Required properties and declared basic data
+types are checked before materialization.
+
+### Relationship mappings
+
+A relationship contract uses `mapping_kind=join`, a target Relationship ID,
+`target_ref.target_table`, and explicit `join_keys` entries containing
+`source_field` and `target_field`. Both endpoint datasets must have approved
+property mappings and materialized instances. The engine then creates outgoing
+relationship references using the deterministic instance IDs.
+
+### Review and publication gate
+
+Only contracts with `review_status=approved` and `status=active` or
+`released` are executed. Pending/draft contracts are reported as blocked.
+Any blocked contract or row-level error makes the run's `success` false. The
+caller must not publish a run unless success is true and downstream quality checks
+also pass.
+
+### Lineage
+
+Each mapped property receives a `FieldLineage` entry containing source table,
+row locator, source field, source-value hash, mapping contract ID/version and
+available evidence. Raw source values are not copied into lineage metadata.
+
+### Scope boundary
+
+This increment provides a deterministic in-memory execution service for data
+already loaded by the current connectors. It does not yet persist instances to a
+database, stream very large datasets, schedule incremental CDC, or replace the
+legacy `Ontology.add_objects` runtime. Those are integration/persistence work
+items for the next increment.
