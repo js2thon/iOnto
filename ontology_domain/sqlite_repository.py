@@ -297,6 +297,18 @@ class SQLiteOntologyRepository:
                 raise RepositoryError("Save the validated Schema before publishing")
             if _sha256(schema_row["schema_json"]) != schema_row["checksum"]:
                 raise RepositoryError("Stored schema checksum mismatch")
+            if schema.mapping_contracts:
+                latest_run = db.execute("""
+                    SELECT run_id, status FROM mapping_runs
+                    WHERE ontology_id=? AND ontology_version=?
+                    ORDER BY created_at DESC, run_id DESC LIMIT 1
+                """, (schema.ontology_id, schema.version)).fetchone()
+                if latest_run is None:
+                    raise RepositoryError("Cannot publish mapped ontology before a mapping run succeeds")
+                if latest_run["status"] != "succeeded":
+                    raise RepositoryError(
+                        f"Cannot publish: latest mapping run {latest_run['run_id']} is {latest_run['status']}"
+                    )
             runs = db.execute("""
                 SELECT run_id, status, result_checksum FROM mapping_runs
                 WHERE ontology_id=? AND ontology_version=? ORDER BY created_at, run_id
