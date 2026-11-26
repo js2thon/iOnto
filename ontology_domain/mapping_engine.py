@@ -353,7 +353,7 @@ def execute_mapping(
         target_table = str(contract.target_ref.get("target_table") or "")
         source_rows, target_rows = source_data.get(source_table), source_data.get(target_table)
         join_keys = contract.join_keys
-        if not source_rows or not target_rows or not join_keys:
+        if source_rows is None or target_rows is None or not join_keys:
             errors.append({"contract_id": contract.id, "reason": "关系映射需要 source/target 数据集及 join_keys"})
             continue
         source_type_id = relation.source_object_type_id
@@ -384,12 +384,13 @@ def execute_mapping(
         outgoing_counts: Dict[str, int] = {}
         incoming_counts: Dict[str, int] = {}
         for instance in instances.values():
-            if instance.object_type_id != source_type_id:
-                continue
-            linked = instance.relationship_refs.get(relationship_id, [])
-            outgoing_counts[instance.id] = len(linked)
-            for target_instance_id in linked:
-                incoming_counts[target_instance_id] = incoming_counts.get(target_instance_id, 0) + 1
+            if instance.object_type_id == source_type_id:
+                linked = instance.relationship_refs.get(relationship_id, [])
+                outgoing_counts[instance.id] = len(linked)
+                for target_instance_id in linked:
+                    incoming_counts[target_instance_id] = incoming_counts.get(target_instance_id, 0) + 1
+            elif instance.object_type_id == target_type_id:
+                incoming_counts[instance.id] = incoming_counts.get(instance.id, 0)
         for source_instance_id, count in outgoing_counts.items():
             if count < relation.source_min_cardinality or (
                 relation.source_max_cardinality is not None and count > relation.source_max_cardinality
