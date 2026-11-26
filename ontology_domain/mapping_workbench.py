@@ -208,7 +208,7 @@ def preview_mapping(schema: OntologySchema, source_data: Dict[str, Any]) -> Dict
 def execute_and_persist(schema: OntologySchema, source_data: Dict[str, Any], repository: Any) -> Dict[str, Any]:
     """Persist the exact schema snapshot and the deterministic mapping run."""
     repository.save_schema(schema)
-    result = execute_mapping(schema, source_rows(source_data))
+    result = execute_mapping(schema, source_rows(source_data), run_id=new_id("mapping-run"))
     persisted = repository.save_mapping_run(schema, result)
     return {"result": result, "persisted": persisted}
 
