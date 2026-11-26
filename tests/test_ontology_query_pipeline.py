@@ -54,6 +54,18 @@ class OntologyQueryPipelineTests(unittest.TestCase):
         self.assertEqual(result["records"][0]["data"]["name"], "Alice")
         self.assertTrue(validate_result(self.ontology, plan, result)["valid"])
 
+    def test_search_without_keyword_lists_target_type(self):
+        plan = _validate_plan({
+            "intent": "search", "target_type": "Employee",
+        }, self.ontology)
+        result = execute_query_plan(self.ontology, plan)
+        self.assertEqual(result["count"], 2)
+        self.assertEqual(
+            [item["data"]["name"] for item in result["records"]],
+            ["Alice", "Bob"],
+        )
+        self.assertTrue(validate_result(self.ontology, plan, result)["valid"])
+
     def test_count_with_filter(self):
         plan = _validate_plan({
             "intent": "count", "target_type": "Employee",
