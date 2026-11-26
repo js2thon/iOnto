@@ -343,19 +343,44 @@ def validate_result(ontology: Any, plan: Dict[str, Any], result: Dict[str, Any])
             errors.append("邻居对象集合与本体关系图独立复核结果不一致")
         if bool(result.get("truncated")) != (len(expected_ids) > plan["limit"]):
             errors.append("邻居查询截断标记不一致")
-        for edge in result.get("relations", []):
-            if not ontology.links.has_edge(edge.get("from"), edge.get("to")):
-                errors.append("邻居证据包含不存在的关系边")
+        expected_edges = []
+        if source in ontology.links:
+            for left, right, data in edges:
+                relation = str(data.get("relation_type") or "")
+                if plan.get("relation_type") and relation != plan["relation_type"]:
+                    continue
+                node = right if left == source else left
+                if node in expected_page:
+                    expected_edges.append((left, right, relation))
+        actual_edges = [
+            (str(edge.get("from")), str(edge.get("to")), str(edge.get("relation") or ""))
+            for edge in result.get("relations", [])
+        ]
+        if sorted(actual_edges) != sorted(expected_edges):
+            errors.append("邻居关系证据与本体关系图不一致或不完整")
 
     elif intent == "path":
         path = result.get("path") or []
         start_node = f"{plan['source_type']}:{plan['source_pk']}"
         end_node = f"{plan['target_type_to']}:{plan['target_pk']}"
+        graph = ontology.links
+        if plan.get("relation_type"):
+            graph = nx.DiGraph()
+            for left, right, data in ontology.links.edges(data=True):
+                if data.get("relation_type") == plan["relation_type"]:
+                    graph.add_edge(left, right)
+        try:
+            expected_path = nx.shortest_path(graph, start_node, end_node)
+        except (nx.NetworkXNoPath, nx.NodeNotFound):
+            expected_path = []
+        if path != expected_path:
+            errors.append("返回路径与本体关系图独立计算的最短路径不一致")
         if path:
             if path[0] != start_node or path[-1] != end_node:
                 errors.append("路径起点或终点与查询计划不一致")
             if returned_ids != path:
                 errors.append("路径对象记录与路径节点序列不一致")
+            expected_relations = []
             for left, right in zip(path, path[1:]):
                 edge_data = ontology.links.get_edge_data(left, right) or {}
                 matching = [
@@ -364,12 +389,16 @@ def validate_result(ontology: Any, plan: Dict[str, Any], result: Dict[str, Any])
                 ]
                 if not matching:
                     errors.append(f"路径包含无效关系边：{left} -> {right}")
-        elif result.get("found"):
-            errors.append("路径标记为 found，但没有路径节点")
-        if bool(result.get("found")) != bool(path):
-            errors.append("路径 found 标记与路径内容不一致")
-        if result.get("length") != max(0, len(path) - 1):
-            errors.append("路径长度与节点序列不一致")
+                expected_relations.append({
+                    "from": left, "to": right,
+                    "relations": sorted(str(v.get("relation_type") or "") for v in matching),
+                })
+            if result.get("relations", []) != expected_relations:
+                errors.append("路径关系证据与本体关系图不一致或不完整")
+        if bool(result.get("found")) != bool(expected_path):
+            errors.append("路径 found 标记与独立计算结果不一致")
+        if result.get("length") != max(0, len(expected_path) - 1):
+            errors.append("路径长度与独立计算结果不一致")
 
     canonical_json = json.dumps(result, ensure_ascii=False, sort_keys=True, default=str)
     digest = hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
