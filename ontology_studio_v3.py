@@ -59,7 +59,7 @@ except ImportError:
 # 页面配置与主题
 # ---------------------------------------------------------------------
 st.set_page_config(
-    page_title="iOnto V5.0",
+    page_title="iOnto V5.1",
     page_icon="🕸️",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -2873,9 +2873,9 @@ def save_eval_run(run: Dict[str, Any]) -> None:
 # ---------------------------------------------------------------------
 # Streamlit 主界面（st.navigation 多页 + 页面函数）
 # ---------------------------------------------------------------------
-st.title("🕸️ iOnto V5.0")
+st.title("🕸️ iOnto V5.1")
 st.caption(
-    "企业本体建模 Pipeline 工作台 · 数据源 → 本体建模 → 智能问答 → "
+    "企业本体建模 Pipeline 工作台 · 数据源 → 本体建模 → 映射工作台 → 智能问答 → "
     "问题测评 → 版本管理 · CSV/Excel · Schema/实例图谱 · LLM 问答 · "
     "证据溯源 · 确定性测评 · 版本快照/回滚"
 )
