@@ -112,6 +112,23 @@ class MappingContractEngineTests(unittest.TestCase):
         instance = next(iter(result["instances"].values()))
         self.assertEqual({"emp_no": "E1"}, instance.lineage.fields[0].source.record_key)
 
+    def test_database_row_missing_configured_key_fails(self):
+        schema = self.make_schema()
+        contract = MappingContract(
+            id="m:eid", name="employee id",
+            source_ref={
+                "source_kind": "postgresql", "table": "employee", "field": "emp_no",
+                "record_key_fields": ["source_pk"],
+            },
+            target_ref={"object_type_id": "ot:employee", "property_id": "p:employee-id"},
+            review_status="approved", status="active",
+        )
+        self.add_property_contract(schema, "m:name", "employee", "name", "ot:employee", "p:name")
+        schema.mapping_contracts["m:eid"] = contract
+        result = execute_mapping(schema, {"employee": [{"emp_no": "E1", "name": "Alice"}]})
+        self.assertFalse(result["success"])
+        self.assertTrue(any("稳定主键字段值" in item["reason"] for item in result["errors"]))
+
     def test_database_contract_requires_stable_record_key(self):
         schema = self.make_schema()
         schema.mapping_contracts["m:eid"] = MappingContract(
