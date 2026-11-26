@@ -1,11 +1,13 @@
-# Ontology Studio V4.0
+# iOnto V5.0 — 企业本体建模 Pipeline 工作台
 
 企业本体建模 Pipeline 工作台。
 
 ## 功能概览
 
 - **数据源**：CSV / Excel 多文件导入；PostgreSQL 连接、Schema 选表、按表加载
-- **本体建模**：主键推断、自动外键、手动关系、Schema/实例图谱、质量检测、Action、JSON/OWL 导出
+- **本体建模（旧版工作台）**：表结构驱动的对象类型生成、主键推断、关系识别、Schema/实例图谱、质量检测、JSON/OWL 导出
+- **V5 领域模型**：ObjectType、Property、Relationship、Identity、Constraint、MappingContract；独立实例模型与字段级血缘
+- **V5 映射引擎**：审核通过的映射契约确定性执行，支持属性映射、白名单转换、关系 Join、实例物化与血缘记录（当前为独立执行服务）
 - **智能问答**：LLM 语义理解 → 结构化查询计划 → 本体确定性执行 → 结果校验 → 证据链 → LLM 答案表达
 - **问题测评**：CQ 问题集、自动测评、确定性比对、失败归因
 - **版本管理**：快照、差异比较、生命周期、回滚
@@ -21,7 +23,7 @@
 5. **证据溯源**：记录查询计划、对象标识、对象记录、关系路径、版本号和结果 SHA-256。
 6. **答案生成**：LLM 只接收已验证结果和证据，负责组织简洁自然语言，不得补充证据之外的事实。
 
-当前证据链达到**本体对象/关系级**：包含对象类型、主键、对象记录和本体映射元数据。当前导入模型尚未为每条实例持久化原始文件行号、数据库主键位置或字段级转换日志，因此不能将其等同于完整的源数据行级血缘。后续可在数据映射阶段补充 source record ID、source field、transformation ID。
+旧版在线问答的证据链达到**本体对象/关系级**。V5 新增的独立映射执行服务已能在内存物化实例并记录字段级血缘，但尚未接入旧版 Streamlit 数据导入、持久化和问答执行路径；不能将 V5 映射引擎的能力误认为旧版工作台已端到端启用。
 
 运行核心查询模块测试：
 
@@ -102,7 +104,7 @@ ontology_workspace/
 | 包 | 用途 |
 |---|---|
 | streamlit | Web UI |
-| pandas / openpyxl | 表格与 Excel |
+| pandas / openpyxl / xlrd | 表格、Excel（xlsx/xls） |
 | networkx / pyvis | 图与可视化 |
 | rdflib | OWL 导出 |
 | openai | LLM 问答 |
@@ -112,9 +114,22 @@ ontology_workspace/
 
 - **图谱空白**：检查浏览器是否拦截脚本；PyVis 使用内联 CDN 资源
 - **PG 连接失败**：确认主机网络、防火墙、`pg_hba.conf` 与用户权限
-- **模型不支持 Tool Calling**：侧边栏问答策略改为「智能检索（降级）」
+- **LLM JSON 模式不兼容**：查询规划器会尝试兼容模式重试；仍失败时检查模型服务的 OpenAI 兼容接口
 - **大表内存不足**：PostgreSQL 导入时先限制每表行数
 
 ## 许可证
 
 按你的项目需要自行约定。本仓库为工作台源码交付包。
+
+
+## V5 映射引擎快速使用（Python API）
+
+V5 映射引擎位于 `ontology_domain.mapping_engine`，面向已构建的
+`OntologySchema` 和内存中的源数据行执行。映射契约必须显式审核通过
+（`review_status="approved"`）并激活（`status="active"` 或
+`"released"`）。具体模型、转换操作、关系 Join 约定和当前集成边界见
+[`docs/V5_DOMAIN_MODEL.md`](docs/V5_DOMAIN_MODEL.md)。
+
+目前它还不是 Streamlit 中可直接点击使用的映射画布；旧版数据源/建模/问答
+仍使用兼容运行时结构。V5 工作台 UI、数据库持久化、增量更新和端到端查询
+切换将在后续集成阶段完成。
