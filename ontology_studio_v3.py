@@ -45,6 +45,7 @@ import networkx as nx
 import pandas as pd
 import streamlit as st
 from ontology_query_pipeline import execute_query_pipeline
+from ontology_domain.mapping_workbench_ui import render_mapping_workbench
 from pyvis.network import Network
 from rdflib import Graph, Literal, Namespace, OWL, RDF, RDFS, URIRef
 
@@ -4450,6 +4451,7 @@ pages = [
     st.Page(render_overview, title="🏠 Pipeline 总览", default=True),
     st.Page(render_data_source, title="📥 数据源"),
     st.Page(render_modeling, title="🏗️ 本体建模"),
+    st.Page(render_mapping_workbench, title="🧩 映射工作台"),
     st.Page(render_qa, title="💬 智能问答"),
     st.Page(render_evaluation, title="🧪 问题测评"),
     st.Page(render_versions, title="🗂️ 版本管理"),
