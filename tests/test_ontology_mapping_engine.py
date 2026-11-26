@@ -75,6 +75,24 @@ class MappingContractEngineTests(unittest.TestCase):
         self.assertEqual("m:name", instance.lineage.fields[1].mapping_contract_id)
         self.assertEqual(3, instance.ontology_version)
 
+    def test_lookup_mapping_kind_is_not_silently_treated_as_direct(self):
+        schema = self.make_schema()
+        contract = MappingContract(
+            id="m:lookup", name="lookup",
+            source_ref={"table": "employee", "field": "emp_no"},
+            target_ref={"object_type_id": "ot:employee", "property_id": "p:employee-id"},
+            mapping_kind="lookup", review_status="approved", status="active",
+        )
+        schema.mapping_contracts[contract.id] = contract
+        result = execute_mapping(schema, {"employee": [{"emp_no": "E1"}]})
+        self.assertFalse(result["success"])
+        self.assertTrue(any("暂不支持" in item["reason"] for item in result["blocked_contracts"]))
+
+    def test_no_mapping_contracts_is_not_reported_as_success(self):
+        result = execute_mapping(self.make_schema(), {})
+        self.assertFalse(result["success"])
+        self.assertTrue(any("没有可执行" in item["reason"] for item in result["blocked_contracts"]))
+
     def test_unapproved_contract_is_blocked(self):
         schema = self.make_schema()
         contract = MappingContract(
