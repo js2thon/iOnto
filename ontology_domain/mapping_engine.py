@@ -201,6 +201,9 @@ def execute_mapping(
     for contract in runnable:
         target = contract.target_ref
         if target.get("property_id"):
+            if contract.mapping_kind not in {"direct", "transform"}:
+                blocked.append({"contract_id": contract.id, "reason": f"属性映射暂不支持 mapping_kind={contract.mapping_kind}"})
+                continue
             object_type_id = str(target.get("object_type_id") or "")
             property_id = str(target.get("property_id") or "")
             prop = schema.properties.get(property_id)
@@ -213,9 +216,15 @@ def execute_mapping(
             else:
                 property_contracts.setdefault(object_type_id, []).append(contract)
         elif target.get("relationship_id"):
+            if contract.mapping_kind != "join":
+                blocked.append({"contract_id": contract.id, "reason": "关系映射必须使用 mapping_kind=join"})
+                continue
             relationship_contracts.append(contract)
         else:
             blocked.append({"contract_id": contract.id, "reason": "target_ref 必须指定 property_id 或 relationship_id"})
+
+    if not property_contracts and not relationship_contracts and not blocked:
+        blocked.append({"reason": "当前本体没有可执行的映射契约"})
 
     instances: Dict[str, OntologyInstance] = {}
     row_instance_ids: Dict[Tuple[str, int, str], str] = {}
