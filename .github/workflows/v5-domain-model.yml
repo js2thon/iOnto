@@ -32,3 +32,4 @@ jobs:
           python -m unittest discover -s tests -p "test_ontology_instance_lineage.py" -v
           python -m unittest discover -s tests -p "test_ontology_mapping_engine.py" -v
           python -m unittest discover -s tests -p "test_ontology_sqlite_repository.py" -v
+          python -m unittest discover -s tests -p "test_ontology_mapping_workbench.py" -v
