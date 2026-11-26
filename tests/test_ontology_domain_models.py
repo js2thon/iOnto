@@ -99,6 +99,19 @@ class OntologyDomainModelTests(unittest.TestCase):
         schema.object_types["ot:employee"].relationship_ids.append("r:missing")
         self.assertTrue(any("missing Relationship" in error for error in schema.validate()))
 
+    def test_identity_cannot_reference_property_from_another_object(self):
+        schema = self.make_schema()
+        schema.identities["i:employee"].property_refs = ["p:department-id"]
+        self.assertTrue(any("from another ObjectType" in error for error in schema.validate()))
+
+    def test_constraint_target_must_exist(self):
+        schema = self.make_schema()
+        schema.constraints["c:orphan"] = Constraint(
+            id="c:orphan", name="orphan", target_ref="p:missing",
+            constraint_type="required",
+        )
+        self.assertTrue(any("unknown target" in error for error in schema.validate()))
+
     def test_constraint_severity_and_fix_policy(self):
         constraint = Constraint(
             id="c:1", name="unique employee id", target_ref="p:employee-id",
