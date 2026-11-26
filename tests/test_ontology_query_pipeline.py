@@ -89,6 +89,16 @@ class OntologyQueryPipelineTests(unittest.TestCase):
                 "filters": [{"property": "salary_secret", "operator": "eq", "value": 1}],
             }, self.ontology)
 
+    def test_count_is_recomputed_independently(self):
+        plan = _validate_plan({
+            "intent": "count", "target_type": "Employee",
+        }, self.ontology)
+        result = execute_query_plan(self.ontology, plan)
+        result["count"] = 99
+        validation = validate_result(self.ontology, plan, result)
+        self.assertFalse(validation["valid"])
+        self.assertTrue(any("独立复核" in error for error in validation["errors"]))
+
     def test_tampered_result_fails_validation(self):
         plan = _validate_plan({
             "intent": "lookup", "target_type": "Employee", "primary_key": "E1"
