@@ -93,6 +93,37 @@ class MappingContractEngineTests(unittest.TestCase):
         self.assertFalse(result["success"])
         self.assertTrue(any("没有可执行" in item["reason"] for item in result["blocked_contracts"]))
 
+    def test_database_lineage_uses_stable_source_primary_key(self):
+        schema = self.make_schema()
+        contract = MappingContract(
+            id="m:eid", name="employee id",
+            source_ref={
+                "source_id": "src:pg", "source_kind": "postgresql",
+                "table": "employee", "field": "emp_no",
+                "record_key_fields": ["emp_no"],
+            },
+            target_ref={"object_type_id": "ot:employee", "property_id": "p:employee-id"},
+            review_status="approved", status="active",
+        )
+        self.add_property_contract(schema, "m:name", "employee", "name", "ot:employee", "p:name")
+        schema.mapping_contracts["m:eid"] = contract
+        result = execute_mapping(schema, {"employee": [{"emp_no": "E1", "name": "Alice"}]})
+        self.assertTrue(result["success"], result["errors"])
+        instance = next(iter(result["instances"].values()))
+        self.assertEqual({"emp_no": "E1"}, instance.lineage.fields[0].source.record_key)
+
+    def test_database_contract_requires_stable_record_key(self):
+        schema = self.make_schema()
+        schema.mapping_contracts["m:eid"] = MappingContract(
+            id="m:eid", name="employee id",
+            source_ref={"source_kind": "postgresql", "table": "employee", "field": "emp_no"},
+            target_ref={"object_type_id": "ot:employee", "property_id": "p:employee-id"},
+            review_status="approved", status="active",
+        )
+        result = execute_mapping(schema, {"employee": [{"emp_no": "E1"}]})
+        self.assertFalse(result["success"])
+        self.assertTrue(any("record_key_fields" in item["reason"] for item in result["blocked_contracts"]))
+
     def test_unapproved_contract_is_blocked(self):
         schema = self.make_schema()
         contract = MappingContract(
