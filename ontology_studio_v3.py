@@ -2756,7 +2756,7 @@ def attribute_failure(
 ) -> str:
     """失败归因：有序决策树，一条结果只归一个码（可复现）。
 
-    E00 未配置 LLM / E01 API 错误 / E02 超时 / E04 零工具调用 /
+    E00 未配置 LLM / E01 API 错误 / E02 超时 / E04 无查询证据阶段 /
     E05 工具结果未覆盖期望 / E06 覆盖但答案缺失 / E07 数值不匹配 /
     E08 文本不匹配 / E09 问题集漂移（期望实体不存在）/ E10 轮次耗尽
     """
@@ -4067,7 +4067,8 @@ def _render_evaluation_running(eval_state: Dict[str, Any]) -> None:
         "text_matched": comparison["text_matched"],
         "numbers_matched": comparison["numbers_matched"],
         "failure_code": failure_code,
-        "tool_calls": len(trace),
+        "pipeline_stages": len(trace),
+        "tool_calls": len(trace),  # legacy compatibility for historical evaluation reports
         "elapsed_seconds": round(elapsed, 1),
         "error": error_text or None,
     })
@@ -4122,7 +4123,7 @@ def _render_evaluation_results() -> None:
                     "问题": r.get("question"),
                     "通过": "✅" if r.get("passed") else "❌",
                     "归因": r.get("failure_code", ""),
-                    "工具调用": r.get("tool_calls", 0),
+                    "Pipeline 阶段": r.get("pipeline_stages", r.get("tool_calls", 0)),
                     "耗时(s)": r.get("elapsed_seconds"),
                 }
                 for r in results
