@@ -227,8 +227,11 @@ def execute_query_plan(ontology: Any, plan: Dict[str, Any]) -> Dict[str, Any]:
             t, pk = target_data.get("type"), target_data.get("pk")
             item = _record(ontology, str(t), str(pk)) if t is not None and pk is not None else None
             if item:
-                records.append(item)
+                if item and all(existing["node_id"] != item["node_id"] for existing in records):
+                    records.append(item)
                 relation_evidence.append({"from": left, "to": right, "relation": rel})
+        return {"intent": intent, "count": len(records), "records": records[:plan["limit"]],
+                "truncated": len(records) > plan["limit"], "relations": relation_evidence}
     elif intent == "path":
         start = f"{plan['source_type']}:{plan['source_pk']}"
         end = f"{plan['target_type_to']}:{plan['target_pk']}"
@@ -262,23 +265,113 @@ def execute_query_plan(ontology: Any, plan: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def validate_result(ontology: Any, plan: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, Any]:
-    """Re-check returned object payloads against canonical storage and compute a stable digest."""
+    """Independently re-run deterministic checks against canonical ontology storage."""
     errors: List[str] = []
-    for item in result.get("records", []):
+    intent = plan["intent"]
+    records = result.get("records", [])
+    returned_ids = [str(item.get("node_id")) for item in records]
+
+    # Every returned payload must be an exact copy of the canonical ontology instance.
+    for item in records:
         t, pk = item.get("type"), str(item.get("primary_key"))
         canonical = ontology.objects.get(t, {}).get(pk)
         if canonical is None:
             errors.append(f"对象不存在：{t}:{pk}")
         elif canonical != item.get("data"):
             errors.append(f"对象内容与本体实例存储不一致：{t}:{pk}")
-    if plan["intent"] == "count" and result.get("count") != result.get("matched_object_count"):
-        errors.append("计数值与命中对象总数不一致")
-    if plan["intent"] == "lookup" and len(result.get("records", [])) > 1:
-        errors.append("主键查询返回多条记录")
+
+    if len(returned_ids) != len(set(returned_ids)):
+        errors.append("查询结果包含重复对象")
+
+    if intent in {"search", "count"}:
+        types = [plan["target_type"]] if plan.get("target_type") else list(ontology.object_types)
+        keyword = str(plan.get("keyword") or "").lower()
+        expected = []
+        for type_name in types:
+            for pk, obj in ontology.objects.get(type_name, {}).items():
+                blob = " ".join(str(v).lower() for v in obj.values() if v is not None)
+                if keyword and keyword not in blob:
+                    continue
+                if _matches(obj, plan.get("filters", [])):
+                    expected.append(f"{type_name}:{pk}")
+        expected_total = len(expected)
+        if result.get("count") != expected_total:
+            errors.append(f"查询总数不一致：执行结果={result.get('count')}，独立复核={expected_total}")
+        expected_page = expected[:plan["limit"]]
+        if returned_ids != expected_page:
+            errors.append("返回对象集合或顺序与独立复核结果不一致")
+        if bool(result.get("truncated")) != (expected_total > plan["limit"]):
+            errors.append("截断标记与实际结果规模不一致")
+        if intent == "count":
+            if result.get("matched_object_count") != expected_total:
+                errors.append("计数值与独立复核的命中对象总数不一致")
+            if result.get("matched_object_ids", []) != expected_page:
+                errors.append("计数证据对象 ID 与独立复核结果不一致")
+
+    elif intent == "lookup":
+        type_name, pk = plan["target_type"], str(plan["primary_key"])
+        canonical = ontology.objects.get(type_name, {}).get(pk)
+        expected_ids = [f"{type_name}:{pk}"] if canonical is not None and _matches(canonical, plan.get("filters", [])) else []
+        if returned_ids != expected_ids:
+            errors.append("主键查询结果与本体实例存储不一致")
+        if len(records) > 1:
+            errors.append("主键查询返回多条记录")
+
+    elif intent == "neighbors":
+        source = f"{plan['source_type']}:{plan['source_pk']}"
+        expected_ids = []
+        if source not in ontology.links:
+            errors.append("邻居查询源对象在关系图中不存在")
+        else:
+            edges = []
+            if plan["direction"] in {"out", "both"}:
+                edges.extend((source, n, d) for _, n, d in ontology.links.out_edges(source, data=True))
+            if plan["direction"] in {"in", "both"}:
+                edges.extend((n, source, d) for n, _, d in ontology.links.in_edges(source, data=True))
+            for left, right, data in edges:
+                relation = str(data.get("relation_type") or "")
+                if plan.get("relation_type") and relation != plan["relation_type"]:
+                    continue
+                node = right if left == source else left
+                if node not in expected_ids:
+                    expected_ids.append(node)
+        expected_page = expected_ids[:plan["limit"]]
+        if returned_ids != expected_page:
+            errors.append("邻居对象集合与本体关系图独立复核结果不一致")
+        if bool(result.get("truncated")) != (len(expected_ids) > plan["limit"]):
+            errors.append("邻居查询截断标记不一致")
+        for edge in result.get("relations", []):
+            if not ontology.links.has_edge(edge.get("from"), edge.get("to")):
+                errors.append("邻居证据包含不存在的关系边")
+
+    elif intent == "path":
+        path = result.get("path") or []
+        start_node = f"{plan['source_type']}:{plan['source_pk']}"
+        end_node = f"{plan['target_type_to']}:{plan['target_pk']}"
+        if path:
+            if path[0] != start_node or path[-1] != end_node:
+                errors.append("路径起点或终点与查询计划不一致")
+            if returned_ids != path:
+                errors.append("路径对象记录与路径节点序列不一致")
+            for left, right in zip(path, path[1:]):
+                edge_data = ontology.links.get_edge_data(left, right) or {}
+                matching = [
+                    data for data in edge_data.values()
+                    if not plan.get("relation_type") or data.get("relation_type") == plan["relation_type"]
+                ]
+                if not matching:
+                    errors.append(f"路径包含无效关系边：{left} -> {right}")
+        elif result.get("found"):
+            errors.append("路径标记为 found，但没有路径节点")
+        if bool(result.get("found")) != bool(path):
+            errors.append("路径 found 标记与路径内容不一致")
+        if result.get("length") != max(0, len(path) - 1):
+            errors.append("路径长度与节点序列不一致")
+
     canonical_json = json.dumps(result, ensure_ascii=False, sort_keys=True, default=str)
     digest = hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
     return {"valid": not errors, "errors": errors, "result_sha256": digest,
-            "checked_records": len(result.get("records", []))}
+            "checked_records": len(records)}
 
 
 def build_provenance(ontology: Any, plan: Dict[str, Any], result: Dict[str, Any],
