@@ -21,6 +21,10 @@ from .mapping_workbench import (
 from .sqlite_repository import RepositoryError, SQLiteOntologyRepository
 
 
+def _source_kind_for(table: str) -> str:
+    return str((st.session_state.get("source_kinds_v2") or {}).get(table, "file"))
+
+
 def _frame_columns(frame: Any) -> List[str]:
     return [str(column) for column in getattr(frame, "columns", [])]
 
@@ -32,7 +36,7 @@ def _primary_key_for(legacy_ontology: Any, table: str) -> List[str]:
 
 
 def _initialize_schema(legacy_ontology: Any, raw_data: Dict[str, Any], repository: Any) -> Any:
-    fingerprint = source_fingerprint(raw_data)
+    fingerprint = source_fingerprint(raw_data, st.session_state.get("source_kinds_v2") or {})
     current = st.session_state.get("v5_mapping_schema")
     previous_fingerprint = st.session_state.get("v5_mapping_source_fingerprint")
     if current is not None:
@@ -62,7 +66,7 @@ def render_mapping_workbench() -> None:
 
     repository = SQLiteOntologyRepository()
     schema = _initialize_schema(legacy_ontology, raw_data, repository)
-    fingerprint = source_fingerprint(raw_data)
+    fingerprint = source_fingerprint(raw_data, st.session_state.get("source_kinds_v2") or {})
     st.session_state.v5_mapping_schema = schema
 
     if schema.validate():
@@ -165,6 +169,7 @@ def render_mapping_workbench() -> None:
                             record_key_fields=_primary_key_for(legacy_ontology, source_table),
                             mapping_kind="transform" if operation else "direct",
                             transform={"operations": [operation]} if operation else None,
+                            source_kind=_source_kind_for(source_table),
                             source_schema_hash=fingerprint,
                         )
                         editable.mapping_contracts[contract.id] = contract
@@ -234,6 +239,8 @@ def render_mapping_workbench() -> None:
                         join_keys=join_keys,
                         source_record_key_fields=_primary_key_for(legacy_ontology, source_table),
                         target_record_key_fields=_primary_key_for(legacy_ontology, target_table),
+                        source_kind=_source_kind_for(source_table),
+                        target_source_kind=_source_kind_for(target_table),
                         source_schema_hash=fingerprint,
                     )
                     editable.mapping_contracts[contract.id] = contract
