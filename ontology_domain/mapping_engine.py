@@ -12,7 +12,7 @@ import json
 import re
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from .instances import FieldLineage, OntologyInstance, SourceLineage, SourceRecordRef
+from .instances import FieldLineage, OntologyInstance, RelationshipLineage, SourceLineage, SourceRecordRef
 from .models import MappingContract, OntologySchema
 
 
@@ -204,7 +204,17 @@ def execute_mapping(
     for contract in runnable:
         target = contract.target_ref
         if target.get("property_id"):
-            property_contracts.setdefault(str(target.get("object_type_id") or ""), []).append(contract)
+            object_type_id = str(target.get("object_type_id") or "")
+            property_id = str(target.get("property_id") or "")
+            prop = schema.properties.get(property_id)
+            if object_type_id not in schema.object_types:
+                blocked.append({"contract_id": contract.id, "reason": f"未知 ObjectType: {object_type_id}"})
+            elif prop is None:
+                blocked.append({"contract_id": contract.id, "reason": f"目标属性不存在: {property_id}"})
+            elif prop.domain_object_type_id != object_type_id:
+                blocked.append({"contract_id": contract.id, "reason": "目标属性不属于指定 ObjectType"})
+            else:
+                property_contracts.setdefault(object_type_id, []).append(contract)
         elif target.get("relationship_id"):
             relationship_contracts.append(contract)
         else:
@@ -217,10 +227,6 @@ def execute_mapping(
 
     # Phase 1: map property values and materialize business object instances.
     for object_type_id, contracts in property_contracts.items():
-        if object_type_id not in schema.object_types:
-            for contract in contracts:
-                errors.append({"contract_id": contract.id, "reason": f"未知 ObjectType: {object_type_id}"})
-            continue
         by_table: Dict[str, List[MappingContract]] = {}
         for contract in contracts:
             table = _contract_source_table(contract)
@@ -233,12 +239,6 @@ def execute_mapping(
             seen_targets = set()
             for contract in table_contracts:
                 property_id = str(contract.target_ref.get("property_id"))
-                if property_id not in schema.properties:
-                    errors.append({"contract_id": contract.id, "reason": f"目标属性不存在: {property_id}"})
-                    continue
-                prop = schema.properties[property_id]
-                if prop.domain_object_type_id != object_type_id:
-                    errors.append({"contract_id": contract.id, "reason": "目标属性不属于指定 ObjectType"})
                 if property_id in seen_targets:
                     errors.append({"table": table, "property_id": property_id, "reason": "同一数据集存在重复目标属性映射"})
                 seen_targets.add(property_id)
@@ -356,15 +356,30 @@ def execute_mapping(
         if source_rows is None or target_rows is None or not join_keys:
             errors.append({"contract_id": contract.id, "reason": "关系映射需要 source/target 数据集及 join_keys"})
             continue
+        invalid_join_fields = []
+        for join_key in join_keys:
+            source_field = str(join_key.get("source_field") or "")
+            target_field = str(join_key.get("target_field") or "")
+            if not source_field or not target_field:
+                invalid_join_fields.append("join key 缺少 source_field/target_field")
+            elif source_rows and source_field not in source_rows[0]:
+                invalid_join_fields.append(f"源数据集缺少关联字段 {source_field}")
+            elif target_rows and target_field not in target_rows[0]:
+                invalid_join_fields.append(f"目标数据集缺少关联字段 {target_field}")
+        if invalid_join_fields:
+            errors.append({"contract_id": contract.id, "reason": "; ".join(invalid_join_fields)})
+            continue
         source_type_id = relation.source_object_type_id
         target_type_id = relation.target_object_type_id
         source_index = {idx: row_instance_ids.get((source_table, idx, source_type_id)) for idx in range(1, len(source_rows)+1)}
         target_index = {idx: row_instance_ids.get((target_table, idx, target_type_id)) for idx in range(1, len(target_rows)+1)}
         target_lookup: Dict[Tuple[Any, ...], List[str]] = {}
+        target_row_by_instance: Dict[str, int] = {}
         for idx, row in enumerate(target_rows, start=1):
             key = tuple(row.get(k.get("target_field")) for k in join_keys)
             if all(v is not None for v in key) and target_index.get(idx):
                 target_lookup.setdefault(key, []).append(target_index[idx])
+                target_row_by_instance[target_index[idx]] = idx
         for idx, row in enumerate(source_rows, start=1):
             source_instance_id = source_index.get(idx)
             if not source_instance_id:
@@ -380,6 +395,23 @@ def execute_mapping(
             for target_instance_id in targets:
                 if target_instance_id not in instance.relationship_refs[relationship_id]:
                     instance.relationship_refs[relationship_id].append(target_instance_id)
+                target_row = target_row_by_instance[target_instance_id]
+                instance.lineage.relationships.append(RelationshipLineage(
+                    relationship_id=relationship_id,
+                    source=SourceRecordRef(
+                        source_id=_source_id(contract), dataset=source_table, table=source_table,
+                        record_key={"row_number": idx}, row_number=idx,
+                    ),
+                    target=SourceRecordRef(
+                        source_id=str(contract.target_ref.get("source_id") or target_table),
+                        dataset=target_table, table=target_table,
+                        record_key={"row_number": target_row}, row_number=target_row,
+                    ),
+                    mapping_contract_id=contract.id,
+                    mapping_contract_version=contract.version,
+                    join_key_hash=_value_hash(key),
+                    evidence=list(contract.evidence),
+                ))
         # Enforce declared relationship endpoint cardinalities after join resolution.
         outgoing_counts: Dict[str, int] = {}
         incoming_counts: Dict[str, int] = {}
