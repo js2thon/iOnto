@@ -41,6 +41,16 @@ def legacy_ontology_to_schema(ontology: Any) -> OntologySchema:
     return schema
 
 
+def load_latest_schema(ontology: Any, repository: Any) -> OntologySchema:
+    """Restore the latest persisted V5 schema for the deterministic legacy ontology ID."""
+    base = legacy_ontology_to_schema(ontology)
+    versions = repository.list_schema_versions(base.ontology_id)
+    if not versions:
+        return base
+    latest_version = max(int(item["version"]) for item in versions)
+    return repository.load_schema(base.ontology_id, latest_version)
+
+
 def source_rows(source_data: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
     """Convert loaded dataframe-like sources to JSON-safe row dictionaries."""
     result: Dict[str, List[Dict[str, Any]]] = {}
