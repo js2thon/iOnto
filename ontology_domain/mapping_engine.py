@@ -137,9 +137,13 @@ def _validate_property_value(prop: Any, value: Any) -> None:
         raise ValueError(f"属性 {prop.name} 的值与声明类型 {kind} 不匹配")
 
 
-def _identity_for(schema: OntologySchema, object_type_id: str, values: Dict[str, Any]):
+def _identity_for(
+    schema: OntologySchema, object_type_id: str, values: Dict[str, Any],
+    identity_refs: Optional[List[str]] = None,
+):
     obj = schema.object_types[object_type_id]
-    for identity_id in obj.identity_ids:
+    candidate_ids = identity_refs or obj.identity_ids
+    for identity_id in candidate_ids:
         identity = schema.identities.get(identity_id)
         if identity and all(prop in values and values[prop] not in (None, "") for prop in identity.property_refs):
             return identity
@@ -298,7 +302,12 @@ def execute_mapping(
                         "reason": "缺少必填属性: " + ", ".join(missing_required),
                     })
                     continue
-                identity = _identity_for(schema, object_type_id, values)
+                contract_identity_refs = list(dict.fromkeys(
+                    identity_id for contract in table_contracts for identity_id in contract.identity_refs
+                ))
+                identity = _identity_for(
+                    schema, object_type_id, values, contract_identity_refs or None
+                )
                 if identity is None:
                     errors.append({"table": table, "row": row_index, "object_type_id": object_type_id, "reason": "无法从已映射属性解析有效业务身份"})
                     continue
