@@ -2902,21 +2902,9 @@ with st.sidebar:
             st.error(f"保存失败：{exc}")
 
     st.header("💬 问答模式")
-    context_limit_mode = st.selectbox(
-        "问答策略",
-        [
-            "工具调用（推荐）",
-            "智能检索（降级）",
-            "每种类型最多 50 条",
-            "每种类型最多 100 条",
-            "全部对象（有上限，易失败）",
-        ],
-        index=0,
-        help=(
-            "工具调用：模型通过 search/get/neighbors/path 等工具按需查本体，"
-            "不把全量实例塞进上下文，适合大数据。"
-            "若模型不支持 function calling，请改用智能检索。"
-        ),
+    st.info(
+        "固定使用确定性本体查询 Pipeline：LLM 解析问题，"
+        "查询规划器生成计划，本体引擎执行，校验器验证，溯源引擎生成证据。"
     )
 
     st.divider()
@@ -3905,7 +3893,7 @@ def render_qa() -> None:
             trace = message.get("trace")
             if trace:
                 with st.expander(
-                    f"🔍 证据溯源（{len(trace)} 次工具调用）", expanded=False
+                    f"🔍 查询证据链（{len(trace)} 个处理阶段）", expanded=False
                 ):
                     for i, item in enumerate(trace, 1):
                         st.markdown(
@@ -4035,26 +4023,29 @@ def _render_evaluation_running(eval_state: Dict[str, Any]) -> None:
         st.rerun()
         return
 
-    # 消费当前一题
-    answer_parts: List[str] = []
+    # 消费当前一题：复用在线问答的确定性 Pipeline
     trace: List[Dict[str, Any]] = []
     error_text = ""
+    answer = ""
     started = datetime.now()
-    for event_type, payload in ask_llm_with_tools(
-        str(question.get("question", "")),
-        eval_state["eval_ontology"],
-        api_key,
-        base_url,
-        model_name,
-        max_rounds=int(eval_state["config"].get("max_rounds", 4)),
-    ):
-        if event_type == "token":
-            answer_parts.append(payload)
-        elif event_type == "tool":
-            trace.append(payload)
-        elif event_type == "error":
-            error_text = payload
-    answer = "".join(answer_parts)
+    try:
+        if not api_key:
+            raise RuntimeError("请先配置 LLM API Key。")
+        if OpenAI is None:
+            raise RuntimeError("缺少 openai 依赖，请执行：pip install openai")
+        client = _make_llm_client(api_key, base_url)
+        pipeline_result = execute_query_pipeline(
+            client, model_name, str(question.get("question", "")),
+            eval_state["eval_ontology"],
+            version_id=eval_state.get("version_id"),
+        )
+        answer = pipeline_result.get("answer", "")
+        trace = pipeline_result.get("trace", [])
+        if not pipeline_result.get("validation", {}).get("valid", False):
+            error_text = "确定性结果校验未通过"
+    except Exception as exc:
+        error_text = _friendly_llm_error(exc)
+        answer = f"本体查询 Pipeline 执行失败：{error_text}"
     elapsed = (datetime.now() - started).total_seconds()
 
     comparison = compare_answer(question, answer, trace)
@@ -4175,8 +4166,8 @@ def render_evaluation() -> None:
 
     st.subheader("🧪 问题测评（CQ 问题集 · 自动测评 · 失败归因）")
     st.caption(
-        "确定性比对为主：数值精确比对 + 证据召回（期望实体出现在工具结果中）。"
-        "评测只支持「工具调用」模式，且必须先保存版本（版本绑定评测）。"
+        "确定性比对为主：数值精确比对 + 证据召回（期望实体/关系出现在证据链中）。"
+        "评测使用与在线问答相同的结构化查询 Pipeline，且必须先保存版本（版本绑定评测）。"
     )
 
     if ontology is None:
