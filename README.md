@@ -7,7 +7,8 @@
 - **数据源**：CSV / Excel 多文件导入；PostgreSQL 连接、Schema 选表、按表加载
 - **本体建模（旧版工作台）**：表结构驱动的对象类型生成、主键推断、关系识别、Schema/实例图谱、质量检测、JSON/OWL 导出
 - **V5 领域模型**：ObjectType、Property、Relationship、Identity、Constraint、MappingContract；独立实例模型与字段级血缘
-- **V5 映射引擎**：审核通过的映射契约确定性执行，支持属性映射、白名单转换、关系 Join、实例物化与血缘记录（当前为独立执行服务）\n- **V5 SQLite 持久化基础**：本体版本、映射运行、实例、血缘与不可变发布包；默认本地数据库 `ontology_workspace/v5_ontology.db`
+- **V5 映射引擎**：审核通过的映射契约确定性执行，支持属性映射、白名单转换、关系 Join、实例物化与血缘记录（当前为独立执行服务）
+- **V5 SQLite 持久化基础**：本体版本、映射运行、实例、血缘与不可变发布包；默认本地数据库 `ontology_workspace/v5_ontology.db`
 - **智能问答**：LLM 语义理解 → 结构化查询计划 → 本体确定性执行 → 结果校验 → 证据链 → LLM 答案表达
 - **问题测评**：CQ 问题集、自动测评、确定性比对、失败归因
 - **版本管理**：快照、差异比较、生命周期、回滚
@@ -139,4 +140,6 @@ V5 映射引擎位于 `ontology_domain.mapping_engine`，面向已构建的
 目前它还不是 Streamlit 中可直接点击使用的映射画布；旧版数据源/建模/问答
 仍使用兼容运行时结构。V5 工作台 UI、数据库持久化、增量更新和端到端查询
 切换将在后续集成阶段完成。
-\n\nV5.1 SQLite repository 的 API 和发布门禁见 [V5 Domain Model 文档](docs/V5_DOMAIN_MODEL.md#sqlite-persistence-and-release-bundles-v51-foundation)。\n
+
+
+V5.1 SQLite repository 的 API 和发布门禁见 [V5 Domain Model 文档](docs/V5_DOMAIN_MODEL.md#sqlite-persistence-and-release-bundles-v51-foundation)。
