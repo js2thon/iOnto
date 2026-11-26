@@ -349,9 +349,7 @@ def validate_result(ontology: Any, plan: Dict[str, Any], result: Dict[str, Any])
                 relation = str(data.get("relation_type") or "")
                 if plan.get("relation_type") and relation != plan["relation_type"]:
                     continue
-                node = right if left == source else left
-                if node in expected_page:
-                    expected_edges.append((left, right, relation))
+                expected_edges.append((left, right, relation))
         actual_edges = [
             (str(edge.get("from")), str(edge.get("to")), str(edge.get("relation") or ""))
             for edge in result.get("relations", [])
