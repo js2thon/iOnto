@@ -256,6 +256,11 @@ def execute_mapping(
             by_table.setdefault(table, []).append(contract)
         for table, table_contracts in by_table.items():
             rows = source_data.get(table)
+            record_locator_ref = next(
+                (c.source_ref for c in table_contracts
+                 if c.source_ref.get("record_key_fields") or c.source_ref.get("primary_key_field")),
+                table_contracts[0].source_ref,
+            )
             if rows is None:
                 errors.append({"table": table, "object_type_id": object_type_id, "reason": "数据源中不存在映射契约指定的数据集"})
                 continue
@@ -300,7 +305,7 @@ def execute_mapping(
                         source = SourceRecordRef(
                             source_id=_source_id(contract), dataset=contract.source_ref.get("dataset"),
                             table=contract.source_ref.get("table") or table,
-                            record_key=_record_key(row, contract.source_ref, row_index), row_number=row_index,
+                            record_key=_record_key(row, record_locator_ref, row_index), row_number=row_index,
                             source_version=contract.source_schema_hash,
                         )
                         field_traces.append(FieldLineage(
@@ -346,9 +351,9 @@ def execute_mapping(
                     mapping_versions={c.id: c.version for c in table_contracts},
                     lineage=SourceLineage(
                         sources=[SourceRecordRef(
-                            source_id=str(next((_source_id(c) for c in table_contracts), table)),
+                            source_id=str(record_locator_ref.get("source_id") or table),
                             dataset=table, table=table, record_key=_record_key(
-                                rows[row_index - 1], table_contracts[0].source_ref, row_index
+                                rows[row_index - 1], record_locator_ref, row_index
                             ),
                             row_number=row_index,
                         )],
