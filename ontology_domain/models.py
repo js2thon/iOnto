@@ -217,8 +217,16 @@ class MappingContract:
     def validate(self) -> None:
         _non_empty(self.id, "MappingContract.id")
         _non_empty(self.name, "MappingContract.name")
+        if not isinstance(self.source_ref, dict) or not isinstance(self.target_ref, dict):
+            raise ValueError("MappingContract source_ref and target_ref must be objects")
         if not self.source_ref or not self.target_ref:
             raise ValueError("MappingContract source_ref and target_ref are required")
+        if not isinstance(self.identity_refs, list) or not isinstance(self.join_keys, list):
+            raise ValueError("MappingContract identity_refs and join_keys must be arrays")
+        if self.transform is not None and not isinstance(self.transform, dict):
+            raise ValueError("MappingContract.transform must be an object")
+        if any(not isinstance(item, dict) for item in self.join_keys):
+            raise ValueError("MappingContract.join_keys entries must be objects")
         if self.mapping_kind not in {"direct", "transform", "join", "lookup", "derived"}:
             raise ValueError(f"Unsupported mapping_kind: {self.mapping_kind}")
         if self.null_policy not in {"preserve", "drop", "default", "reject"}:
