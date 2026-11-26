@@ -94,6 +94,11 @@ class OntologyDomainModelTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             contract.validate()
 
+    def test_missing_relationship_reference_is_reported(self):
+        schema = self.make_schema()
+        schema.object_types["ot:employee"].relationship_ids.append("r:missing")
+        self.assertTrue(any("missing Relationship" in error for error in schema.validate()))
+
     def test_constraint_severity_and_fix_policy(self):
         constraint = Constraint(
             id="c:1", name="unique employee id", target_ref="p:employee-id",
