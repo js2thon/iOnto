@@ -165,7 +165,9 @@ def _matches(obj: Dict[str, Any], filters: List[Dict[str, Any]]) -> bool:
         else:
             try:
                 left, right = actual, expected
-                if isinstance(left, (int, float)) and not isinstance(left, bool):
+                if op in {"gt", "gte", "lt", "lte"}:
+                    left, right = float(left), float(right)
+                elif isinstance(left, (int, float)) and not isinstance(left, bool):
                     right = float(right)
                 ok = FILTER_OPERATORS[op](left, right)
             except (TypeError, ValueError):
@@ -202,7 +204,8 @@ def execute_query_plan(ontology: Any, plan: Dict[str, Any]) -> Dict[str, Any]:
                     records.append(_record(ontology, t, pk))
         if intent == "count":
             return {"intent": intent, "count": len(records),
-                    "matched_object_ids": [x["node_id"] for x in records],
+                    "matched_object_count": len(records),
+                    "matched_object_ids": [x["node_id"] for x in records[:plan["limit"]]],
                     "records": records[:plan["limit"]], "truncated": len(records) > plan["limit"]}
     elif intent == "neighbors":
         source = _record(ontology, plan["source_type"], plan["source_pk"])
@@ -268,8 +271,8 @@ def validate_result(ontology: Any, plan: Dict[str, Any], result: Dict[str, Any])
             errors.append(f"对象不存在：{t}:{pk}")
         elif canonical != item.get("data"):
             errors.append(f"对象内容与本体实例存储不一致：{t}:{pk}")
-    if plan["intent"] == "count" and result.get("count") != len(result.get("matched_object_ids", [])):
-        errors.append("计数值与命中对象 ID 数量不一致")
+    if plan["intent"] == "count" and result.get("count") != result.get("matched_object_count"):
+        errors.append("计数值与命中对象总数不一致")
     if plan["intent"] == "lookup" and len(result.get("records", [])) > 1:
         errors.append("主键查询返回多条记录")
     canonical_json = json.dumps(result, ensure_ascii=False, sort_keys=True, default=str)
