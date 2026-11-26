@@ -9,7 +9,6 @@ from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 import hashlib
 import json
-import re
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from .instances import FieldLineage, OntologyInstance, RelationshipLineage, SourceLineage, SourceRecordRef
