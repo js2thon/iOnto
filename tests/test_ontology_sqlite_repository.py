@@ -113,6 +113,31 @@ class SQLiteOntologyRepositoryTests(unittest.TestCase):
         with self.assertRaisesRegex(RepositoryError, "already has mapping runs"):
             self.repo.save_schema(self.schema)
 
+    def test_publish_requires_successful_mapping_run(self):
+        from ontology_domain import MappingContract
+        contract = MappingContract(
+            id="map:employee", name="员工编号",
+            source_ref={"table": "employees", "field": "employee_id"},
+            target_ref={"object_type_id": "ot:employee", "property_id": "p:employee-id"},
+            review_status="approved", status="active",
+        )
+        self.schema.mapping_contracts[contract.id] = contract
+        self.repo.save_schema(self.schema)
+        with self.assertRaisesRegex(RepositoryError, "before a mapping run succeeds"):
+            self.repo.publish_release(self.schema)
+        self.repo.save_mapping_run(self.schema, {
+            "run_id": "failed-run", "ontology_id": self.schema.ontology_id,
+            "ontology_version": self.schema.version, "instances": {}, "success": False,
+        })
+        with self.assertRaisesRegex(RepositoryError, "latest mapping run failed-run is failed"):
+            self.repo.publish_release(self.schema)
+        self.repo.save_mapping_run(self.schema, {
+            "run_id": "successful-run", "ontology_id": self.schema.ontology_id,
+            "ontology_version": self.schema.version, "instances": {}, "success": True,
+        })
+        release = self.repo.publish_release(self.schema)
+        self.assertTrue(release["created"])
+
     def test_run_version_must_match_schema(self):
         with self.assertRaises(RepositoryError):
             self.repo.save_mapping_run(self.schema, {
