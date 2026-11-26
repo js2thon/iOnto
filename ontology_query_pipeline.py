@@ -71,14 +71,23 @@ def interpret_question(client: Any, model: str, question: str, ontology: Any) ->
         "不确定时用 null；不要猜测主键。"
         "\n本体 Schema：\n" + json.dumps(schema, ensure_ascii=False)
     )
-    response = client.chat.completions.create(
-        model=model,
-        messages=[{"role": "system", "content": system},
-                  {"role": "user", "content": question}],
-        temperature=0,
-        max_tokens=700,
-        response_format={"type": "json_object"},
-    )
+    request = {
+        "model": model,
+        "messages": [{"role": "system", "content": system},
+                     {"role": "user", "content": question}],
+        "temperature": 0,
+        "max_tokens": 700,
+    }
+    try:
+        response = client.chat.completions.create(
+            **request, response_format={"type": "json_object"}
+        )
+    except Exception as exc:
+        # Some OpenAI-compatible gateways do not implement response_format.
+        message = str(exc).lower()
+        if not any(token in message for token in ("response_format", "json_object", "unknown parameter", "unsupported")):
+            raise
+        response = client.chat.completions.create(**request)
     raw = response.choices[0].message.content or "{}"
     return _validate_plan(_json_object(raw), ontology)
 
@@ -103,7 +112,10 @@ def _validate_plan(raw: Dict[str, Any], ontology: Any) -> Dict[str, Any]:
         if intent == "search" and not str(raw.get("keyword") or "").strip():
             raise QueryPlanError("关键词搜索缺少 keyword")
         plan["target_type"] = t or None
-        for item in raw.get("filters") or []:
+        raw_filters = raw.get("filters") or []
+        if raw_filters and not t:
+            raise QueryPlanError("使用属性过滤时必须明确指定 target_type")
+        for item in raw_filters:
             if not isinstance(item, dict):
                 raise QueryPlanError("filters 中存在非法条件")
             prop = str(item.get("property") or "")
@@ -126,6 +138,16 @@ def _validate_plan(raw: Dict[str, Any], ontology: Any) -> Dict[str, Any]:
         relation = raw.get("relation_type")
         if relation and relation not in ontology.link_types:
             raise QueryPlanError(f"本体中不存在关系类型：{relation}")
+        if relation:
+            rel_info = ontology.link_types[relation]
+            allowed_source = rel_info.get("source")
+            allowed_target = rel_info.get("target")
+            if intent == "neighbors" and stype not in {allowed_source, allowed_target}:
+                raise QueryPlanError(f"关系 {relation} 不连接对象类型 {stype}")
+            if intent == "path" and not (
+                stype == allowed_source and str(raw.get("target_type_to")) == allowed_target
+            ):
+                raise QueryPlanError(f"路径类型与关系 {relation} 的定义方向不一致")
         direction = str(raw.get("direction") or "out").lower()
         if direction not in {"out", "in", "both"}:
             raise QueryPlanError("direction 仅支持 out/in/both")
