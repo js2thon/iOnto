@@ -187,13 +187,19 @@ class Ontology:
             raise ValueError(f"ObjectType '{type_name}' 不存在")
         pk_field = self.object_types[type_name]["primary_key"]
 
-        for record in records:
+        for row_number, record in enumerate(records, start=1):
             clean = {str(k): json_safe(v) for k, v in record.items()}
             pk_value = clean.get(pk_field)
             if pk_value is None or str(pk_value).strip() == "":
-                continue
+                raise ValueError(
+                    f"对象类型 {type_name} 第 {row_number} 行主键 {pk_field} 为空；拒绝静默丢弃记录"
+                )
 
             key = str(pk_value)
+            if key in self.objects[type_name]:
+                raise ValueError(
+                    f"对象类型 {type_name} 存在重复主键 {key}；拒绝覆盖已有实例"
+                )
             self.objects[type_name][key] = clean
             self.links.add_node(
                 make_node_id(type_name, key),
@@ -255,7 +261,7 @@ class Ontology:
         pk_field = self.object_types[type_name]["primary_key"]
         clean = {str(k): json_safe(v) for k, v in data.items()}
         if clean.get(pk_field) is None or str(clean.get(pk_field)).strip() == "":
-            clean[pk_field] = str(uuid.uuid4())[:8]
+            raise ValueError(f"创建 {type_name} 失败：必须显式提供有效主键 {pk_field}")
 
         key = str(clean[pk_field])
         if key in self.objects[type_name]:
@@ -724,7 +730,9 @@ class AutoOntologyBuilder:
             if df[col].is_unique and df[col].notna().all():
                 return str(col)
 
-        return str(df.columns[0])
+        # No reliable single-column identity was found. The UI may let a user
+        # choose a key explicitly; the builder must never guess the first column.
+        return ""
 
     def from_dataframes(
         self,
@@ -747,11 +755,15 @@ class AutoOntologyBuilder:
                 continue
 
             pk = primary_keys.get(table_name) or self.infer_primary_key(df, table_name)
-            if pk not in df.columns:
-                pk = f"{table_name}_id"
-                df[pk] = [str(i) for i in range(1, len(df) + 1)]
+            if not pk or pk not in df.columns:
+                raise ValueError(
+                    f"数据表 {table_name} 无法自动识别可靠主键，请在本体建模配置中人工选择主键"
+                )
+            if df[pk].isna().any() or df[pk].astype(str).str.strip().eq("").any():
+                raise ValueError(f"数据表 {table_name} 主键列 {pk} 存在空值")
+            if df[pk].astype(str).duplicated().any():
+                raise ValueError(f"数据表 {table_name} 主键列 {pk} 存在重复值")
 
-            # 如果指定主键有空值或重复，仍允许导入非空记录，但给出质量提示
             actual_pks[table_name] = pk
             normalized_data[table_name] = df
 
