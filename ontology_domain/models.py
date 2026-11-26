@@ -319,7 +319,9 @@ class OntologySchema:
             if constraint.target_ref not in known_targets:
                 errors.append(f"Constraint {constraint.id} references unknown target {constraint.target_ref}")
         for contract in self.mapping_contracts.values():
-            for identity_id in contract.identity_refs:
+            if not isinstance(contract.target_ref, dict):
+                continue
+            for identity_id in contract.identity_refs if isinstance(contract.identity_refs, list) else []:
                 identity = self.identities.get(identity_id)
                 if identity is None:
                     errors.append(f"MappingContract {contract.id} references missing Identity {identity_id}")
