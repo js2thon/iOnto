@@ -44,9 +44,8 @@ def apply_transform(value: Any, spec: Optional[Dict[str, Any]]) -> Any:
         return value
     if not isinstance(spec, dict):
         raise MappingExecutionError("transform 必须是 JSON 对象")
-    forbidden = {"python", "code", "script", "eval", "expression"}
-    if forbidden.intersection(spec):
-        raise MappingExecutionError("transform 不允许执行代码或任意表达式")
+    if set(spec) - {"operations"}:
+        raise MappingExecutionError("transform 仅允许 operations 字段")
     operations = spec.get("operations", [])
     if not isinstance(operations, list):
         raise MappingExecutionError("transform.operations 必须是数组")
