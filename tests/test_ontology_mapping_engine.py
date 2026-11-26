@@ -90,6 +90,8 @@ class MappingContractEngineTests(unittest.TestCase):
 
     def test_missing_identity_is_not_silently_materialized(self):
         schema = self.make_schema()
+        schema.properties["p:employee-id"].required = False
+        schema.properties["p:employee-id"].nullable = True
         self.add_property_contract(schema, "m:name", "employee", "employee_name", "ot:employee", "p:name")
         result = execute_mapping(schema, {"employee": [{"employee_name": "Alice"}]})
         self.assertFalse(result["success"])
