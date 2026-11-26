@@ -16,12 +16,13 @@ from .models import MappingContract, OntologySchema, new_id
 from .mapping_engine import execute_mapping
 
 
-def source_fingerprint(source_data: Dict[str, Any]) -> str:
+def source_fingerprint(source_data: Dict[str, Any], source_kinds: Optional[Dict[str, str]] = None) -> str:
     inventory = {}
     for name, frame in sorted(source_data.items()):
         columns = list(getattr(frame, "columns", []))
         dtypes = {str(k): str(v) for k, v in getattr(frame, "dtypes", {}).items()}
-        inventory[str(name)] = {"columns": [str(c) for c in columns], "dtypes": dtypes}
+        inventory[str(name)] = {"columns": [str(c) for c in columns], "dtypes": dtypes,
+                                "source_kind": (source_kinds or {}).get(str(name), "file")}
     payload = json.dumps(inventory, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
