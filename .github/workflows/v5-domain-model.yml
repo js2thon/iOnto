@@ -8,12 +8,16 @@ on:
       - "tests/test_ontology_instance_lineage.py"
       - "tests/test_ontology_mapping_engine.py"
       - "tests/test_ontology_sqlite_repository.py"
+      - "tests/test_ontology_mapping_workbench.py"
+      - "ontology_studio_v3.py"
       - ".github/workflows/v5-domain-model.yml"
   push:
     branches: [main]
     paths:
       - "ontology_domain/**"
       - "tests/test_ontology_domain_models.py"
+      - "tests/test_ontology_mapping_workbench.py"
+      - "ontology_studio_v3.py"
       - ".github/workflows/v5-domain-model.yml"
 
 jobs:
