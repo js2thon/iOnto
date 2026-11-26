@@ -89,12 +89,6 @@ def apply_transform(value: Any, spec: Optional[Dict[str, Any]]) -> Any:
         elif op == "datetime_iso":
             if result not in (None, ""):
                 result = datetime.fromisoformat(str(result)).isoformat()
-        elif op == "regex_replace":
-            if result is not None:
-                pattern = str(operation.get("pattern", ""))
-                if len(pattern) > 256:
-                    raise MappingExecutionError("正则表达式长度不能超过 256")
-                result = re.sub(pattern, str(operation.get("replacement", "")), str(result))
         else:
             raise MappingExecutionError(f"不支持的转换操作: {op}")
     return result
@@ -378,7 +372,8 @@ def execute_mapping(
         for idx, row in enumerate(target_rows, start=1):
             key = tuple(row.get(k.get("target_field")) for k in join_keys)
             if all(v is not None for v in key) and target_index.get(idx):
-                target_lookup.setdefault(key, []).append(target_index[idx])
+                if target_index[idx] not in target_lookup.setdefault(key, []):
+                    target_lookup[key].append(target_index[idx])
                 target_row_by_instance[target_index[idx]] = idx
         for idx, row in enumerate(source_rows, start=1):
             source_instance_id = source_index.get(idx)
@@ -421,7 +416,7 @@ def execute_mapping(
                 outgoing_counts[instance.id] = len(linked)
                 for target_instance_id in linked:
                     incoming_counts[target_instance_id] = incoming_counts.get(target_instance_id, 0) + 1
-            elif instance.object_type_id == target_type_id:
+            if instance.object_type_id == target_type_id:
                 incoming_counts[instance.id] = incoming_counts.get(instance.id, 0)
         for source_instance_id, count in outgoing_counts.items():
             if count < relation.source_min_cardinality or (
