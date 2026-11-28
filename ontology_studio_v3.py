@@ -3874,7 +3874,110 @@ def render_modeling() -> None:
                         key="v2_v5_schema_dl",
                     )
 
+            # ---- 1) V5 持久化 + 3) 推理门禁发布 ----
+            st.markdown("---")
+            st.markdown("#### V5 持久化与发布门禁")
+            from ontology_domain.sqlite_repository import (
+                RepositoryError,
+                SQLiteOntologyRepository,
+            )
+            from ontology_domain.reasoning_gate import publish_with_gate, run_reasoning_gate
+
+            db_path = st.text_input(
+                "SQLite 路径",
+                value=st.session_state.get("v5_db_path", "ontology_workspace/v5_ontology.db"),
+                key="v2_v5_db_path",
+            )
+            st.session_state.v5_db_path = db_path
+
+            pc1, pc2, pc3 = st.columns(3)
+            with pc1:
+                if st.button("保存 V5 Schema 到 SQLite", type="primary", key="v2_save_v5"):
+                    try:
+                        if st.session_state.v5_schema is None:
+                            st.error("当前无 V5 Schema")
+                        else:
+                            repo = SQLiteOntologyRepository(db_path)
+                            info = repo.save_schema(st.session_state.v5_schema)
+                            st.success(
+                                f"已保存 {info['ontology_id']}@v{info['version']} "
+                                f"checksum={info['checksum'][:18]}…"
+                            )
+                    except RepositoryError as exc:
+                        st.error(str(exc))
+                    except Exception as exc:
+                        st.error(f"保存失败：{exc}")
+            with pc2:
+                if st.button("运行推理/质量门禁", key="v2_run_gate"):
+                    report = run_reasoning_gate(
+                        st.session_state.v5_schema, ontology=ontology
+                    )
+                    st.session_state.v5_gate_report = report.to_dict()
+                    if report.passed:
+                        st.success("门禁通过")
+                    else:
+                        st.error("门禁未通过（存在 block/error）")
+            with pc3:
+                force_pub = st.checkbox("强制发布（跳过门禁）", value=False, key="v2_force_pub")
+                if st.button("门禁通过后发布 Release", key="v2_publish"):
+                    try:
+                        if st.session_state.v5_schema is None:
+                            st.error("当前无 V5 Schema")
+                        else:
+                            repo = SQLiteOntologyRepository(db_path)
+                            out = publish_with_gate(
+                                repo,
+                                st.session_state.v5_schema,
+                                ontology=ontology,
+                                force=force_pub,
+                            )
+                            st.session_state.v5_gate_report = out.get("gate")
+                            if out.get("published"):
+                                st.success(out.get("message", "发布成功"))
+                                st.json(out.get("release"))
+                            else:
+                                st.error(out.get("message", "发布失败"))
+                    except RepositoryError as exc:
+                        st.error(str(exc))
+                    except Exception as exc:
+                        st.error(f"发布失败：{exc}")
+
+            # 加载已有版本
+            with st.expander("从 SQLite 加载已有 Schema 版本", expanded=False):
+                load_oid = st.text_input(
+                    "ontology_id",
+                    value=(
+                        st.session_state.v5_schema.ontology_id
+                        if st.session_state.get("v5_schema")
+                        else ""
+                    ),
+                    key="v2_load_oid",
+                )
+                load_ver = st.number_input("version", min_value=1, value=1, key="v2_load_ver")
+                if st.button("加载 Schema", key="v2_load_schema_btn"):
+                    try:
+                        repo = SQLiteOntologyRepository(db_path)
+                        loaded = repo.load_schema(load_oid, int(load_ver))
+                        st.session_state.v5_schema = loaded
+                        st.success(f"已加载 {load_oid}@v{load_ver}")
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(str(exc))
+
+            if st.session_state.get("v5_gate_report"):
+                with st.expander("最近门禁报告", expanded=True):
+                    gr = st.session_state.v5_gate_report
+                    st.write("通过" if gr.get("passed") else "未通过")
+                    st.json(gr)
+
         elif viz_mode == "本地交互增强":
+            # ---- 2) 选中节点 → 侧栏编辑 ----
+            type_names = list(ontology.object_types.keys())
+            selected_type = st.selectbox(
+                "选中实体类型（模拟画布选中）",
+                ["—"] + type_names,
+                key="v2_canvas_selected_type",
+            )
             left, right = st.columns([2, 1])
             with left:
                 local_view = st.selectbox(
@@ -3925,7 +4028,7 @@ def render_modeling() -> None:
 - **滚轮**：缩放
 - **空白拖动**：平移画布
 - **悬停**：查看属性详情
-- **业务对象图**：支持「适应画布 / 重新布局 / 导出 PNG」
+- **上方选中类型**：打开侧栏编辑并回写 V5
                     """
                 )
                 st.markdown("#### 结构摘要")
@@ -3934,20 +4037,59 @@ def render_modeling() -> None:
                 st.metric("实例节点", ontology.links.number_of_nodes())
                 st.metric("关系边", ontology.links.number_of_edges())
 
-                st.markdown("#### 快速定位")
-                focus_type = st.selectbox(
-                    "查看类型详情",
-                    ["—"] + list(ontology.object_types.keys()),
-                    key="v2_adv_focus_type",
-                )
-                if focus_type and focus_type != "—":
+                focus_type = selected_type if selected_type and selected_type != "—" else None
+                if focus_type:
+                    from ontology_domain.canvas_edit import CanvasEditService
+
                     info = ontology.object_types[focus_type]
+                    st.markdown(f"#### 选中：`{focus_type}`")
                     st.write(f"**主键**：`{info.get('primary_key')}`")
                     st.write(f"**属性**：{', '.join(info.get('properties', []))}")
-                    if info.get("description"):
-                        st.write(info["description"])
                     cnt = len(ontology.objects.get(focus_type, {}))
                     st.write(f"**实例数**：{cnt}")
+
+                    new_desc = st.text_area(
+                        "描述",
+                        value=str(info.get("description") or ""),
+                        key=f"v2_side_desc_{focus_type}",
+                        height=70,
+                    )
+                    new_prop = st.text_input("新增属性名", key=f"v2_side_prop_{focus_type}")
+                    if st.button("保存描述到 V5", key=f"v2_side_save_{focus_type}"):
+                        svc = CanvasEditService(
+                            ontology,
+                            schema=st.session_state.get("v5_schema"),
+                            auto_v5=True,
+                        )
+                        r = svc.update_object_type(focus_type, description=new_desc)
+                        st.session_state.v5_schema = svc.get_v5_schema()
+                        (st.success if r.ok else st.error)(r.message)
+                        if r.ok:
+                            st.rerun()
+                    if new_prop and st.button("添加属性并回写 V5", key=f"v2_side_addp_{focus_type}"):
+                        svc = CanvasEditService(
+                            ontology,
+                            schema=st.session_state.get("v5_schema"),
+                            auto_v5=True,
+                        )
+                        r = svc.add_property(focus_type, new_prop.strip())
+                        st.session_state.v5_schema = svc.get_v5_schema()
+                        (st.success if r.ok else st.error)(r.message)
+                        if r.ok:
+                            st.rerun()
+                    if st.button("删除该类型（强制）", key=f"v2_side_del_{focus_type}"):
+                        svc = CanvasEditService(
+                            ontology,
+                            schema=st.session_state.get("v5_schema"),
+                            auto_v5=True,
+                        )
+                        r = svc.delete_object_type(focus_type, force=True)
+                        st.session_state.v5_schema = svc.get_v5_schema()
+                        (st.success if r.ok else st.error)(r.message)
+                        if r.ok:
+                            st.rerun()
+                else:
+                    st.info("在上方选择实体类型以打开侧栏编辑。")
 
         else:
             # Ontosphere 专业画布
