@@ -17,6 +17,7 @@ from ui.pages.data_source import _build_ontology_from_raw
 from ui.session import (
     after_structural_edit,
     get_v5_schema,
+    materialize_abox_from_legacy,
     set_v5_schema,
     sync_legacy_from_v5,
 )

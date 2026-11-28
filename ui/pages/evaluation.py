@@ -21,6 +21,7 @@ from ui.evaluation_lib import (
 )
 from ui.llm import _friendly_llm_error, _make_llm_client, ask_llm
 from ui.llm_config import load_llm_config
+from ui.session import get_query_ontology, materialize_abox_from_legacy
 
 def _ensure_list(value: Any) -> List[str]:
     """data_editor 中列表列可能被编辑为字符串；统一转 List[str]。"""
@@ -213,7 +214,9 @@ def _render_evaluation_results() -> None:
 
 
 def render_evaluation() -> None:
-    ontology = st.session_state.ontology_v2
+    if st.session_state.get("v5_schema") is not None and st.session_state.get("ontology_v2") is not None:
+        materialize_abox_from_legacy()
+    ontology = get_query_ontology() or st.session_state.ontology_v2
 
     st.subheader("🧪 问题测评（CQ 问题集 · 自动测评 · 失败归因）")
     st.caption(
