@@ -23,6 +23,7 @@ KEY_SOURCE_META = "source_metadata"
 KEY_PK_CONFIG = "pk_config"
 KEY_MANUAL_LINKS = "manual_links_config"
 KEY_MESSAGES = "messages_v2"
+KEY_ABOX = "v5_abox_store"
 
 
 def init_session() -> None:
@@ -30,6 +31,7 @@ def init_session() -> None:
         KEY_ONTOLOGY: None,
         KEY_RAW_DATA: {},
         KEY_MESSAGES: [],
+        KEY_ABOX: None,
         KEY_PK_CONFIG: {},
         KEY_MANUAL_LINKS: [],
         "restored_version_id": None,
@@ -105,3 +107,32 @@ def after_structural_edit(editor: Any) -> OntologySchema:
     if hasattr(editor, "get_edit_log"):
         st.session_state["canvas_edit_log"] = editor.get_edit_log()
     return schema
+
+
+def get_abox_store():
+    return st.session_state.get(KEY_ABOX)
+
+
+def set_abox_store(store) -> None:
+    st.session_state[KEY_ABOX] = store
+
+
+def materialize_abox_from_legacy() -> Optional[object]:
+    """若有 V5 schema 与 legacy ontology，投影为 ABoxStore。"""
+    from ontology_domain.abox_runtime import ABoxStore
+
+    schema = get_v5_schema()
+    ontology = get_ontology()
+    if schema is None or ontology is None:
+        return None
+    store = ABoxStore.from_legacy(ontology, schema)
+    set_abox_store(store)
+    return store
+
+
+def get_query_ontology():
+    """问答优先使用 V5 ABox 投影视图，否则回退 legacy Ontology。"""
+    store = get_abox_store()
+    if store is not None:
+        return store.to_query_view()
+    return get_ontology()

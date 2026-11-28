@@ -9,15 +9,31 @@ from openai import OpenAI
 from ontology_query_pipeline import execute_query_pipeline
 from ui.llm import _friendly_llm_error, _make_llm_client
 from ui.llm_config import load_llm_config
+from ui.session import get_abox_store, get_query_ontology, materialize_abox_from_legacy
 from ui.versioning import read_current_pointer
 
 def render_qa() -> None:
-    ontology = st.session_state.ontology_v2
+    ontology = get_query_ontology()
+    if ontology is None:
+        ontology = st.session_state.ontology_v2
+    abox = get_abox_store()
+    if abox is None and st.session_state.get("ontology_v2") is not None and st.session_state.get("v5_schema") is not None:
+        abox = materialize_abox_from_legacy()
+        if abox is not None:
+            ontology = abox.to_query_view()
 
     if ontology is None:
         st.info("请先生成本体（「数据源」→「本体建模」），再进行智能问答。")
         return
 
+    abox_store = get_abox_store()
+    if abox_store is not None:
+        st.caption(
+            f"查询后端：V5 ABox（{abox_store.summary().get('instance_count', 0)} 实例，"
+            f"schema v{abox_store.schema.version}）"
+        )
+    else:
+        st.caption("查询后端：legacy Ontology（尚未物化 V5 ABox）")
     st.subheader("基于本体的智能问答")
     st.caption(
         "LLM 负责语义理解和最终表达；查询规划器生成结构化计划，"
