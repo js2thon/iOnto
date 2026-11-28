@@ -65,7 +65,7 @@ def _infer_logical_type(series: "pd.Series") -> str:
 
     # datetime / date
     try:
-        parsed = pd.to_datetime(sample, errors="coerce", utc=False)
+        parsed = pd.to_datetime(sample, errors="coerce", utc=False, format="mixed")
         if parsed.notna().mean() > 0.9:
             # if all times are midnight → date
             times = parsed.dropna()
