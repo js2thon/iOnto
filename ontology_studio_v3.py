@@ -3050,7 +3050,7 @@ def _commit_raw_data(
     auto_build: bool = True,
     source_kind: str = "file",
 ) -> Optional[str]:
-    """将预览数据写入会话；默认自动生成本体。
+    """将预览数据写入会话；提取元数据；默认自动生成本体。
 
     返回错误信息；成功返回 None。
     """
@@ -3061,15 +3061,33 @@ def _commit_raw_data(
     st.session_state.messages_v2 = []
     st.session_state.manual_links_config = []
     st.session_state.pk_config = {}
+    st.session_state.source_metadata = None
+    st.session_state.v5_tbox_schema = None
+
+    # 元数据提取（TBox 上一步）
+    if preview_data:
+        try:
+            from ontology_domain.metadata_extractor import extract_source_metadata
+
+            meta = extract_source_metadata(preview_data, source_kind=source_kind)
+            st.session_state.source_metadata = meta
+            # 预填主键建议
+            for tname, tmeta in meta.tables.items():
+                if tmeta.suggested_primary_key:
+                    st.session_state.pk_config[tname] = tmeta.suggested_primary_key
+        except Exception as meta_exc:
+            st.session_state.source_metadata_error = str(meta_exc)
 
     if not auto_build:
         st.session_state.ontology_v2 = None
         return None
 
     try:
-        ontology = _build_ontology_from_raw(preview_data)
+        ontology = _build_ontology_from_raw(
+            preview_data,
+            primary_keys=dict(st.session_state.pk_config) or None,
+        )
         st.session_state.ontology_v2 = ontology
-        # 把推断出的主键写回配置，便于后续在建模页调整
         for type_name, info in ontology.object_types.items():
             st.session_state.pk_config[type_name] = info["primary_key"]
         return None
@@ -3484,6 +3502,110 @@ def _render_modeling_config(
                 })
         st.session_state.manual_links_config = manual_links
 
+        # ---- 元数据 → TBox（建模上一步）----
+        st.markdown("---")
+        st.markdown("**① 数据源元数据 → 生成 TBox**")
+        st.caption(
+            "先从数据源提取列类型、主键/外键候选，再生成 V5 TBox（类/属性/关系），"
+            "确认后再加载实例（ABox）。"
+        )
+        meta = st.session_state.get("source_metadata")
+        if meta is None and usable:
+            if st.button("提取源元数据", key="v2_extract_meta"):
+                try:
+                    from ontology_domain.metadata_extractor import extract_source_metadata
+
+                    st.session_state.source_metadata = extract_source_metadata(
+                        usable, source_kind="dataframe"
+                    )
+                    meta = st.session_state.source_metadata
+                    for tname, tmeta in meta.tables.items():
+                        if tmeta.suggested_primary_key:
+                            st.session_state.pk_config[tname] = tmeta.suggested_primary_key
+                    st.success("元数据提取完成")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"元数据提取失败：{exc}")
+        if meta is not None:
+            meta_rows = []
+            for tname, tmeta in meta.tables.items():
+                meta_rows.append(
+                    {
+                        "表": tname,
+                        "行数": tmeta.row_count,
+                        "列数": tmeta.column_count,
+                        "建议主键": tmeta.suggested_primary_key or "—",
+                        "PK候选": ", ".join(tmeta.primary_key_candidates) or "—",
+                        "FK候选数": len(tmeta.foreign_key_candidates),
+                    }
+                )
+            st.dataframe(pd.DataFrame(meta_rows), use_container_width=True, hide_index=True)
+            with st.expander("列级元数据详情", expanded=False):
+                for tname, tmeta in meta.tables.items():
+                    st.markdown(f"**{tname}**")
+                    st.dataframe(
+                        pd.DataFrame([c.to_dict() for c in tmeta.columns]),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+            if meta.relationship_candidates:
+                st.markdown("关系候选（按置信度）")
+                st.dataframe(
+                    pd.DataFrame(meta.relationship_candidates),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+            min_conf = st.slider(
+                "关系最小置信度",
+                min_value=0.0,
+                max_value=1.0,
+                value=0.5,
+                step=0.05,
+                key="v2_tbox_min_conf",
+            )
+            if st.button("根据元数据生成 TBox（仅结构，不含实例）", key="v2_gen_tbox"):
+                try:
+                    from ontology_domain.tbox_generator import (
+                        apply_tbox_to_legacy_ontology,
+                        generate_tbox_from_metadata,
+                        metadata_to_tbox_summary,
+                    )
+
+                    tbox = generate_tbox_from_metadata(
+                        meta,
+                        include_relationships=True,
+                        min_rel_confidence=float(min_conf),
+                        primary_key_overrides=dict(st.session_state.pk_config),
+                    )
+                    st.session_state.v5_tbox_schema = tbox
+                    st.session_state.v5_schema = tbox
+                    # 同步到 legacy 结构（空实例）
+                    if st.session_state.ontology_v2 is None:
+                        st.session_state.ontology_v2 = Ontology()
+                    apply_tbox_to_legacy_ontology(tbox, st.session_state.ontology_v2)
+                    summary = metadata_to_tbox_summary(tbox)
+                    st.success(
+                        f"TBox 已生成：{summary['object_types']} 类 · "
+                        f"{summary['properties']} 属性 · "
+                        f"{summary['relationships']} 关系 · "
+                        f"{summary['identities']} Identity"
+                    )
+                    st.json(summary)
+                except Exception as exc:
+                    st.error(f"TBox 生成失败：{exc}")
+
+            if st.session_state.get("v5_tbox_schema") is not None:
+                st.download_button(
+                    "下载 TBox V5 JSON",
+                    data=st.session_state.v5_tbox_schema.to_json(),
+                    file_name="ionto_tbox_v5.json",
+                    mime="application/json",
+                    key="v2_tbox_dl",
+                )
+
+        st.markdown("---")
+        st.markdown("**② 确认并生成完整本体（TBox + ABox 实例）**")
+
         if st.button("🚀 确认并生成本体", type="primary", key="v2_build_ontology"):
             try:
                 with st.spinner("正在构建本体与识别关系..."):
@@ -3493,6 +3615,10 @@ def _render_modeling_config(
                         manual_links=manual_links,
                     )
                     st.session_state.ontology_v2 = ontology
+                    # 若已有 TBox，保留 V5 并标记已物化 ABox
+                    if st.session_state.get("v5_tbox_schema") is not None:
+                        st.session_state.v5_schema = st.session_state.v5_tbox_schema
+                        st.session_state.v5_schema.metadata["abox_materialized"] = True
                 st.success(
                     f"本体生成成功：{len(ontology.object_types)} 类型 · "
                     f"{ontology.links.number_of_nodes()} 实例 · "
