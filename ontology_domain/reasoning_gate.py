@@ -145,6 +145,7 @@ def run_reasoning_gate(
     *,
     ontology: Any = None,
     require_identity: bool = False,
+    run_owl: bool = True,
 ) -> GateReport:
     findings: List[GateFinding] = []
     stats: Dict[str, Any] = {}
@@ -168,6 +169,31 @@ def run_reasoning_gate(
                     )
                 )
 
+    owl_report: Dict[str, Any] = {}
+    if run_owl and ontology is not None:
+        try:
+            from .owl_reasoner import reason_over_ontology
+
+            rr = reason_over_ontology(ontology, schema=schema, try_owlrl=True)
+            owl_report = rr.to_dict()
+            for f in rr.findings:
+                sev = "error" if f.severity == "error" else (
+                    "warning" if f.severity == "warning" else "info"
+                )
+                findings.append(GateFinding(sev, f"OWL:{f.code}", f.message, target_ref=""))
+            if not rr.consistent:
+                findings.append(
+                    GateFinding(
+                        "error",
+                        "OWL_INCONSISTENT",
+                        f"推理引擎报告不一致（engine={rr.engine}, profile={rr.profile}）",
+                    )
+                )
+        except Exception as exc:
+            findings.append(
+                GateFinding("warning", "OWL_REASONER_ERROR", f"OWL 推理层异常：{exc}")
+            )
+
     stats = {
         "object_types": len(schema.object_types),
         "properties": len(schema.properties),
@@ -175,6 +201,7 @@ def run_reasoning_gate(
         "identities": len(schema.identities),
         "constraints": len(schema.constraints),
         "schema_version": schema.version,
+        "owl": owl_report,
         "finding_counts": {
             "block": sum(1 for f in findings if f.severity == "block"),
             "error": sum(1 for f in findings if f.severity == "error"),

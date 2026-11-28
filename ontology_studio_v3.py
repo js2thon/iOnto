@@ -3910,13 +3910,32 @@ def render_modeling() -> None:
             with pc2:
                 if st.button("运行推理/质量门禁", key="v2_run_gate"):
                     report = run_reasoning_gate(
-                        st.session_state.v5_schema, ontology=ontology
+                        st.session_state.v5_schema, ontology=ontology, run_owl=True
                     )
                     st.session_state.v5_gate_report = report.to_dict()
                     if report.passed:
                         st.success("门禁通过")
                     else:
                         st.error("门禁未通过（存在 block/error）")
+                if st.button("仅运行 OWL 推理层", key="v2_run_owl"):
+                    try:
+                        from ontology_domain.owl_reasoner import reason_over_ontology
+
+                        rr = reason_over_ontology(
+                            ontology,
+                            schema=st.session_state.v5_schema,
+                            try_owlrl=True,
+                        )
+                        st.session_state.v5_owl_report = rr.to_dict()
+                        if rr.consistent:
+                            st.success(
+                                f"一致 · engine={rr.engine} · "
+                                f"断言 {rr.asserted_triple_count} · 推断 +{rr.inferred_triple_count}"
+                            )
+                        else:
+                            st.error(f"不一致 · engine={rr.engine}")
+                    except Exception as exc:
+                        st.error(f"OWL 推理失败：{exc}")
             with pc3:
                 force_pub = st.checkbox("强制发布（跳过门禁）", value=False, key="v2_force_pub")
                 if st.button("门禁通过后发布 Release", key="v2_publish"):
@@ -3969,6 +3988,9 @@ def render_modeling() -> None:
                     gr = st.session_state.v5_gate_report
                     st.write("通过" if gr.get("passed") else "未通过")
                     st.json(gr)
+            if st.session_state.get("v5_owl_report"):
+                with st.expander("OWL 推理报告", expanded=False):
+                    st.json(st.session_state.v5_owl_report)
 
         elif viz_mode == "本地交互增强":
             # ---- 2) 选中节点 → 侧栏编辑 ----
