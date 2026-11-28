@@ -3668,12 +3668,213 @@ def render_modeling() -> None:
 
         viz_mode = st.radio(
             "可视化模式",
-            ["本地交互增强", "Ontosphere 专业画布"],
+            ["本地交互增强", "结构编辑回写 V5", "Ontosphere 专业画布"],
             horizontal=True,
             key="v2_viz_mode",
         )
 
-        if viz_mode == "本地交互增强":
+        if viz_mode == "结构编辑回写 V5":
+            from ontology_domain.canvas_edit import CanvasEditService
+
+            if "v5_schema" not in st.session_state:
+                st.session_state.v5_schema = None
+            if "canvas_edit_log" not in st.session_state:
+                st.session_state.canvas_edit_log = []
+
+            service = CanvasEditService(
+                ontology,
+                schema=st.session_state.v5_schema,
+                auto_v5=True,
+            )
+            st.session_state.v5_schema = service.get_v5_schema()
+
+            st.markdown("#### 白名单结构编辑（同步 Legacy 运行时 + V5 Schema）")
+            st.caption(
+                "仅允许 ObjectType / Property / Relationship 的增删改。"
+                "删除有依赖时需勾选「强制」。变更立即反映到图谱与 V5 模型。"
+            )
+
+            summary = service.schema_summary()
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("V5 ObjectTypes", summary.get("object_types", 0))
+            m2.metric("V5 Properties", summary.get("properties", 0))
+            m3.metric("V5 Relationships", summary.get("relationships", 0))
+            m4.metric("V5 version", summary.get("version", "-"))
+            if summary.get("validation_errors"):
+                st.warning("V5 校验问题：" + "; ".join(summary["validation_errors"][:5]))
+
+            edit_kind = st.selectbox(
+                "编辑对象",
+                ["ObjectType", "Property", "Relationship"],
+                key="v2_edit_kind",
+            )
+            action = st.radio(
+                "操作", ["新增", "更新", "删除"], horizontal=True, key="v2_edit_action"
+            )
+            force = st.checkbox("强制删除（级联清理依赖）", value=False, key="v2_edit_force")
+            result_box = st.empty()
+
+            if edit_kind == "ObjectType":
+                if action == "新增":
+                    n = st.text_input("类型名称", key="v2_ot_name")
+                    pk = st.text_input("主键字段", value="id", key="v2_ot_pk")
+                    props_raw = st.text_input(
+                        "属性列表（逗号分隔）", value="id,name", key="v2_ot_props"
+                    )
+                    desc = st.text_area("描述", key="v2_ot_desc", height=60)
+                    if st.button("执行新增 ObjectType", type="primary", key="v2_ot_add"):
+                        props = [p.strip() for p in props_raw.split(",") if p.strip()]
+                        r = service.add_object_type(
+                            n, primary_key=pk or "id", properties=props, description=desc
+                        )
+                        st.session_state.v5_schema = service.get_v5_schema()
+                        st.session_state.canvas_edit_log = service.get_edit_log()
+                        (result_box.success if r.ok else result_box.error)(r.message)
+                        if r.ok:
+                            st.rerun()
+                elif action == "更新":
+                    names = list(ontology.object_types.keys())
+                    if not names:
+                        st.info("暂无类型")
+                    else:
+                        n = st.selectbox("选择类型", names, key="v2_ot_upd_name")
+                        label = st.text_input("显示标签", value=n, key="v2_ot_upd_label")
+                        desc = st.text_area(
+                            "描述",
+                            value=str(ontology.object_types[n].get("description") or ""),
+                            key="v2_ot_upd_desc",
+                            height=60,
+                        )
+                        if st.button("执行更新 ObjectType", type="primary", key="v2_ot_upd"):
+                            r = service.update_object_type(n, label=label, description=desc)
+                            st.session_state.v5_schema = service.get_v5_schema()
+                            st.session_state.canvas_edit_log = service.get_edit_log()
+                            (result_box.success if r.ok else result_box.error)(r.message)
+                            if r.ok:
+                                st.rerun()
+                else:
+                    names = list(ontology.object_types.keys())
+                    if not names:
+                        st.info("暂无类型")
+                    else:
+                        n = st.selectbox("选择要删除的类型", names, key="v2_ot_del_name")
+                        if st.button("执行删除 ObjectType", type="primary", key="v2_ot_del"):
+                            r = service.delete_object_type(n, force=force)
+                            st.session_state.v5_schema = service.get_v5_schema()
+                            st.session_state.canvas_edit_log = service.get_edit_log()
+                            (result_box.success if r.ok else result_box.error)(r.message)
+                            for w in r.warnings:
+                                st.warning(w)
+                            if r.ok:
+                                st.rerun()
+
+            elif edit_kind == "Property":
+                type_names = list(ontology.object_types.keys())
+                if not type_names:
+                    st.info("请先创建 ObjectType")
+                elif action == "新增":
+                    tn = st.selectbox("所属类型", type_names, key="v2_prop_type")
+                    pn = st.text_input("属性名", key="v2_prop_name")
+                    dt = st.selectbox(
+                        "数据类型",
+                        ["string", "integer", "number", "boolean", "date", "datetime", "json"],
+                        key="v2_prop_dt",
+                    )
+                    req = st.checkbox("必填", value=False, key="v2_prop_req")
+                    if st.button("执行新增属性", type="primary", key="v2_prop_add"):
+                        r = service.add_property(tn, pn, data_type=dt, required=req)
+                        st.session_state.v5_schema = service.get_v5_schema()
+                        st.session_state.canvas_edit_log = service.get_edit_log()
+                        (result_box.success if r.ok else result_box.error)(r.message)
+                        if r.ok:
+                            st.rerun()
+                elif action == "删除":
+                    tn = st.selectbox("所属类型", type_names, key="v2_prop_del_type")
+                    props = list(ontology.object_types[tn].get("properties") or [])
+                    if not props:
+                        st.info("该类型暂无属性")
+                    else:
+                        pn = st.selectbox("属性", props, key="v2_prop_del_name")
+                        if st.button("执行删除属性", type="primary", key="v2_prop_del"):
+                            r = service.delete_property(tn, pn, force=force)
+                            st.session_state.v5_schema = service.get_v5_schema()
+                            st.session_state.canvas_edit_log = service.get_edit_log()
+                            (result_box.success if r.ok else result_box.error)(r.message)
+                            if r.ok:
+                                st.rerun()
+                else:
+                    st.info("属性更新请使用「删除后重建」或后续字段编辑器。")
+
+            else:
+                type_names = list(ontology.object_types.keys())
+                if action == "新增":
+                    if not type_names:
+                        st.info("请先创建 ObjectType")
+                    else:
+                        rn = st.text_input("关系名称", key="v2_rel_name")
+                        src = st.selectbox("源类型", type_names, key="v2_rel_src")
+                        tgt = st.selectbox("目标类型", type_names, key="v2_rel_tgt")
+                        desc = st.text_input("描述", key="v2_rel_desc")
+                        if st.button("执行新增关系", type="primary", key="v2_rel_add"):
+                            r = service.add_relationship(rn, src, tgt, description=desc)
+                            st.session_state.v5_schema = service.get_v5_schema()
+                            st.session_state.canvas_edit_log = service.get_edit_log()
+                            (result_box.success if r.ok else result_box.error)(r.message)
+                            if r.ok:
+                                st.rerun()
+                elif action == "删除":
+                    rels = list(ontology.link_types.keys())
+                    if not rels:
+                        st.info("暂无关系")
+                    else:
+                        rn = st.selectbox("关系", rels, key="v2_rel_del")
+                        if st.button("执行删除关系", type="primary", key="v2_rel_del_btn"):
+                            r = service.delete_relationship(rn, force=force)
+                            st.session_state.v5_schema = service.get_v5_schema()
+                            st.session_state.canvas_edit_log = service.get_edit_log()
+                            (result_box.success if r.ok else result_box.error)(r.message)
+                            if r.ok:
+                                st.rerun()
+                else:
+                    st.info("关系更新请先删除再新增。")
+
+            st.markdown("---")
+            st.markdown("#### 当前结构预览")
+            gcol1, gcol2 = st.columns(2)
+            with gcol1:
+                if ontology.object_types:
+                    st.components.v1.html(
+                        create_business_object_graph(ontology), height=520, scrolling=True
+                    )
+            with gcol2:
+                st.markdown("**Legacy ObjectTypes**")
+                st.json({
+                    k: {
+                        "pk": v.get("primary_key"),
+                        "properties": v.get("properties"),
+                        "description": v.get("description"),
+                    }
+                    for k, v in ontology.object_types.items()
+                })
+                st.markdown("**Legacy Relationships**")
+                st.json(ontology.link_types)
+
+            if st.session_state.get("canvas_edit_log"):
+                with st.expander("编辑审计日志", expanded=False):
+                    st.json(st.session_state.canvas_edit_log[-20:])
+
+            if st.session_state.get("v5_schema") is not None:
+                with st.expander("V5 Schema JSON（可复制用于持久化）", expanded=False):
+                    st.code(st.session_state.v5_schema.to_json(), language="json")
+                    st.download_button(
+                        "下载 V5 Schema JSON",
+                        data=st.session_state.v5_schema.to_json(),
+                        file_name="ionto_v5_schema.json",
+                        mime="application/json",
+                        key="v2_v5_schema_dl",
+                    )
+
+        elif viz_mode == "本地交互增强":
             left, right = st.columns([2, 1])
             with left:
                 local_view = st.selectbox(
