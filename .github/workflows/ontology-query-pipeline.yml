@@ -12,8 +12,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install test dependency
-        run: python -m pip install networkx
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install networkx pandas rdflib
       - name: Compile application and query pipeline
         run: python -m py_compile ontology_studio_v3.py ontology_query_pipeline.py
       - name: Run deterministic query pipeline tests
