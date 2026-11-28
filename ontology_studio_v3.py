@@ -648,61 +648,42 @@ class Ontology:
         data.pop("exported_at", None)
         return data
 
-    def export_owl(self) -> str:
-        graph = Graph()
-        ex = Namespace("http://example.org/ontology#")
-        graph.bind("ex", ex)
-        graph.bind("owl", OWL)
-        graph.bind("rdfs", RDFS)
-        ontology_uri = URIRef("http://example.org/ontology")
-        graph.add((ontology_uri, RDF.type, OWL.Ontology))
+    def export_owl(self, format: str = "xml") -> str:
+        """导出 RDF/OWL。
 
-        for type_name, info in self.object_types.items():
-            cls = ex[type_name]
-            graph.add((cls, RDF.type, OWL.Class))
-            graph.add((cls, RDFS.label, Literal(type_name)))
-            if info.get("description"):
-                graph.add((cls, RDFS.comment, Literal(info["description"])))
+        format:
+          - "xml"    : 传统 RDF/XML（向后兼容）
+          - "turtle" / "ttl" : 扁平 Turtle
+          - "trig"   : TriG（保留命名图，推荐给 Ontosphere）
+        """
+        from ontology_domain.rdf_export import (
+            export_ontology_to_dataset,
+            serialize_owl_xml,
+            serialize_turtle_flat,
+            serialize_trig,
+        )
 
-            for prop in info["properties"]:
-                prop_uri = ex[f"{type_name}_{prop}"]
-                graph.add((prop_uri, RDF.type, OWL.DatatypeProperty))
-                graph.add((prop_uri, RDFS.domain, cls))
-                graph.add((prop_uri, RDFS.label, Literal(prop)))
+        ds = export_ontology_to_dataset(
+            self, include_instances=True, include_mapping=True
+        )
+        fmt = (format or "xml").lower()
+        if fmt == "trig":
+            return serialize_trig(ds)
+        if fmt in ("turtle", "ttl"):
+            return serialize_turtle_flat(ds)
+        return serialize_owl_xml(ds)
 
-        # 导出全部实例，不再截断为固定 40 条
-        for type_name, objects in self.objects.items():
-            for pk, obj in objects.items():
-                instance = ex[f"{type_name}_{pk}"]
-                graph.add((instance, RDF.type, ex[type_name]))
-                graph.add((instance, RDFS.label, Literal(f"{type_name}:{pk}")))
-                for prop, value in obj.items():
-                    if value is not None:
-                        graph.add((
-                            instance,
-                            ex[f"{type_name}_{prop}"],
-                            Literal(str(value)),
-                        ))
+    def export_for_ontosphere(
+        self, *, include_instances: bool = True, include_mapping: bool = True
+    ) -> Tuple[str, str]:
+        """一键导出供 Ontosphere 使用，返回 (trig_content, filename)。"""
+        from ontology_domain.rdf_export import export_for_ontosphere
 
-        for relation_name, info in self.link_types.items():
-            prop = ex[relation_name]
-            graph.add((prop, RDF.type, OWL.ObjectProperty))
-            graph.add((prop, RDFS.domain, ex[info["source"]]))
-            graph.add((prop, RDFS.range, ex[info["target"]]))
-            graph.add((prop, RDFS.label, Literal(relation_name)))
-            if info.get("description"):
-                graph.add((prop, RDFS.comment, Literal(info["description"])))
-
-        for source, target, data in self.links.edges(data=True):
-            relation_name = data.get("relation_type") or data.get("label")
-            if relation_name:
-                graph.add((
-                    ex[source.replace(":", "_")],
-                    ex[relation_name],
-                    ex[target.replace(":", "_")],
-                ))
-
-        return graph.serialize(format="xml")
+        return export_for_ontosphere(
+            self,
+            include_instances=include_instances,
+            include_mapping=include_mapping,
+        )
 
 
 # ---------------------------------------------------------------------
@@ -3870,7 +3851,7 @@ def render_modeling() -> None:
     # 导出
     with tabs[7]:
         st.subheader("本体数据导出")
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         with col1:
             st.download_button(
                 "下载 JSON",
@@ -3881,9 +3862,9 @@ def render_modeling() -> None:
             )
         with col2:
             try:
-                owl_data = ontology.export_owl()
+                owl_data = ontology.export_owl(format="xml")
                 st.download_button(
-                    "下载 OWL",
+                    "下载 OWL (RDF/XML)",
                     data=owl_data,
                     file_name="ontology_v4.owl",
                     mime="application/rdf+xml",
@@ -3891,10 +3872,48 @@ def render_modeling() -> None:
                 )
             except Exception as exc:
                 st.error(f"OWL 导出失败：{exc}")
+        with col3:
+            try:
+                ttl_data = ontology.export_owl(format="turtle")
+                st.download_button(
+                    "下载 Turtle",
+                    data=ttl_data,
+                    file_name="ontology_v4.ttl",
+                    mime="text/turtle",
+                    use_container_width=True,
+                )
+            except Exception as exc:
+                st.error(f"Turtle 导出失败：{exc}")
 
+        st.markdown("---")
+        st.subheader("Ontosphere 集成（可视化 + 推理）")
         st.caption(
-            "当前 OWL 导出包含类、数据属性、对象属性及实例关系；"
-            "如需生产级语义约束，建议后续补充 SHACL Shapes 和推理验证。"
+            "导出 TriG（保留命名图）后，可直接在 Ontosphere 中加载，"
+            "进行专业画布交互、完整 OWL 2 DL 推理与 SHACL 验证。"
+        )
+        c1, c2 = st.columns([2, 1])
+        with c1:
+            try:
+                trig_content, trig_name = ontology.export_for_ontosphere()
+                st.download_button(
+                    "下载 TriG（推荐给 Ontosphere）",
+                    data=trig_content,
+                    file_name=trig_name,
+                    mime="application/trig",
+                    use_container_width=True,
+                    type="primary",
+                )
+            except Exception as exc:
+                st.error(f"TriG 导出失败：{exc}")
+        with c2:
+            st.link_button(
+                "打开 Ontosphere",
+                "https://thhanke.github.io/ontosphere/",
+                use_container_width=True,
+            )
+        st.info(
+            "使用步骤：1) 下载 .trig 文件  2) 打开 Ontosphere  "
+            "3) 将文件拖入页面或通过「Load RDF」加载  4) 可直接运行推理与验证。"
         )
 
 
