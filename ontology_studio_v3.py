@@ -3532,7 +3532,7 @@ def render_modeling() -> None:
 
     tabs = st.tabs([
         "📊 概览", "🔗 业务对象关系图", "🏗️ Schema 图谱", "🕸️ 实例图谱",
-        "🔎 关系分析", "🧪 质量检测", "⚡ Action", "📤 导出",
+        "🎨 高级可视化", "🔎 关系分析", "🧪 质量检测", "⚡ Action", "📤 导出",
     ])
 
     # 概览
@@ -3658,8 +3658,168 @@ def render_modeling() -> None:
         else:
             st.warning("请至少选择一种实体类型。")
 
-    # 关系分析
+    # 高级可视化（Ontosphere 交互 + 统一控制台）
     with tabs[4]:
+        st.subheader("高级可视化交互")
+        st.caption(
+            "本地图谱（业务对象 / Schema / 实例）适合快速浏览；"
+            "Ontosphere 提供专业画布、完整 OWL 2 DL 推理与 SHACL 验证。"
+        )
+
+        viz_mode = st.radio(
+            "可视化模式",
+            ["本地交互增强", "Ontosphere 专业画布"],
+            horizontal=True,
+            key="v2_viz_mode",
+        )
+
+        if viz_mode == "本地交互增强":
+            left, right = st.columns([2, 1])
+            with left:
+                local_view = st.selectbox(
+                    "视图",
+                    ["业务对象关系图", "Schema 图谱", "实例图谱（当前筛选）"],
+                    key="v2_local_view",
+                )
+                if local_view == "业务对象关系图" and ontology.object_types:
+                    st.components.v1.html(
+                        create_business_object_graph(ontology),
+                        height=660,
+                        scrolling=True,
+                    )
+                elif local_view == "Schema 图谱" and ontology.object_types:
+                    st.components.v1.html(
+                        create_schema_graph(ontology),
+                        height=660,
+                        scrolling=True,
+                    )
+                else:
+                    all_types = list(ontology.object_types.keys())
+                    sel = st.multiselect(
+                        "实例类型",
+                        all_types,
+                        default=all_types[: min(5, len(all_types))],
+                        key="v2_adv_inst_types",
+                    )
+                    if sel:
+                        ghtml, n, e, trunc = create_instance_graph(
+                            ontology,
+                            selected_types=sel,
+                            max_nodes=300,
+                            search_text="",
+                            focus_node=None,
+                            hops=1,
+                            physics=True,
+                        )
+                        st.caption(f"节点 {n} · 边 {e}" + (" · 已截断" if trunc else ""))
+                        st.components.v1.html(ghtml, height=620, scrolling=True)
+                    else:
+                        st.info("请选择至少一个实体类型。")
+
+            with right:
+                st.markdown("#### 交互说明")
+                st.markdown(
+                    """
+- **拖拽**：移动节点
+- **滚轮**：缩放
+- **空白拖动**：平移画布
+- **悬停**：查看属性详情
+- **业务对象图**：支持「适应画布 / 重新布局 / 导出 PNG」
+                    """
+                )
+                st.markdown("#### 结构摘要")
+                st.metric("实体类型", len(ontology.object_types))
+                st.metric("关系类型", len(ontology.link_types))
+                st.metric("实例节点", ontology.links.number_of_nodes())
+                st.metric("关系边", ontology.links.number_of_edges())
+
+                st.markdown("#### 快速定位")
+                focus_type = st.selectbox(
+                    "查看类型详情",
+                    ["—"] + list(ontology.object_types.keys()),
+                    key="v2_adv_focus_type",
+                )
+                if focus_type and focus_type != "—":
+                    info = ontology.object_types[focus_type]
+                    st.write(f"**主键**：`{info.get('primary_key')}`")
+                    st.write(f"**属性**：{', '.join(info.get('properties', []))}")
+                    if info.get("description"):
+                        st.write(info["description"])
+                    cnt = len(ontology.objects.get(focus_type, {}))
+                    st.write(f"**实例数**：{cnt}")
+
+        else:
+            # Ontosphere 专业画布
+            st.markdown(
+                """
+**Ontosphere** 提供：
+- Reactodia 专业知识图画布（拖拽编辑、多布局、聚类）
+- 完整 **OWL 2 DL** 推理（Konclude WASM）
+- 推理后 **SHACL** 验证与修复建议
+- TBox / ABox 切换、命名空间管理、MCP Agent 工具
+                """
+            )
+            c1, c2, c3 = st.columns([2, 1, 1])
+            with c1:
+                try:
+                    trig_content, trig_name = ontology.export_for_ontosphere()
+                    st.download_button(
+                        "① 下载 TriG（含命名图）",
+                        data=trig_content,
+                        file_name=trig_name,
+                        mime="application/trig",
+                        use_container_width=True,
+                        type="primary",
+                        key="v2_adv_trig_dl",
+                    )
+                except Exception as exc:
+                    st.error(f"TriG 导出失败：{exc}")
+            with c2:
+                try:
+                    ttl = ontology.export_owl(format="turtle")
+                    st.download_button(
+                        "下载 Turtle",
+                        data=ttl,
+                        file_name="ionto_schema.ttl",
+                        mime="text/turtle",
+                        use_container_width=True,
+                        key="v2_adv_ttl_dl",
+                    )
+                except Exception as exc:
+                    st.error(str(exc))
+            with c3:
+                st.link_button(
+                    "② 打开 Ontosphere",
+                    "https://thhanke.github.io/ontosphere/",
+                    use_container_width=True,
+                )
+
+            st.info(
+                "操作步骤：下载 TriG → 打开 Ontosphere → 将文件拖入页面 "
+                "（或使用 Load RDF）→ 即可交互编辑、运行推理与验证。"
+            )
+
+            # 内嵌 Ontosphere（只读入口，数据需用户自行加载）
+            with st.expander("在页面内嵌 Ontosphere（需自行加载导出的文件）", expanded=False):
+                st.components.v1.iframe(
+                    "https://thhanke.github.io/ontosphere/",
+                    height=720,
+                    scrolling=True,
+                )
+
+            st.markdown("#### 导出内容说明")
+            st.markdown(
+                """
+| 命名图 | 内容 |
+|--------|------|
+| `urn:ionto:schema:` | 类、数据属性、对象属性（TBox） |
+| `urn:ionto:data:` | 实例与关系断言（ABox） |
+| `urn:ionto:mapping:` | 源表映射元数据 |
+                """
+            )
+
+    # 关系分析
+    with tabs[5]:
         st.subheader("实体关联路径查询")
         node_options = list(ontology.links.nodes)
         if len(node_options) >= 2:
@@ -3725,7 +3885,7 @@ def render_modeling() -> None:
                 )
 
     # 质量检测
-    with tabs[5]:
+    with tabs[6]:
         st.subheader("本体关系质量检查")
         report = quality_report(ontology)
         q1, q2, q3, q4 = st.columns(4)
@@ -3762,7 +3922,7 @@ def render_modeling() -> None:
         )
 
     # Action
-    with tabs[6]:
+    with tabs[7]:
         st.subheader("业务对象 Action")
         action_type = st.radio(
             "操作类型", ["更新对象", "新建对象", "删除对象"],
@@ -3849,7 +4009,7 @@ def render_modeling() -> None:
             st.json(ontology.actions_log[-10:])
 
     # 导出
-    with tabs[7]:
+    with tabs[8]:
         st.subheader("本体数据导出")
         col1, col2, col3 = st.columns(3)
         with col1:
