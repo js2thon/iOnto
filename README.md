@@ -2,6 +2,15 @@
 
 企业本体建模 Pipeline 工作台。
 
+## 架构要点（V5）
+
+- **结构真相源**：`OntologySchema`（V5）。编辑与发布以 V5 为准，再投影到 legacy 运行时图。
+- **Legacy 运行时**：`ontology_domain/legacy_runtime.Ontology` 承载实例图（ABox），供图谱与问答使用。
+- **桥接**：`ontology_domain/runtime_bridge.py`、`ui/session.py`（`set_v5_schema` / `after_structural_edit`）。
+- **UI 模块**：`ui/pages/`（总览 / 数据源 / 建模）、`ui/graphs.py`、`ui/analysis.py`、`ui/data_io.py`；入口仍为 `ontology_studio_v3.py`。
+- **元数据 → TBox**：`metadata_extractor` + `metadata_workbench`（多 Bundle 可编辑可组合）→ `tbox_generator`。
+- **导出 / 推理**：TriG 命名图对接 Ontosphere；`reasoning_gate` + 可选 OWL-RL。
+
 ## 功能概览
 
 - **数据源**：CSV / Excel 多文件导入；PostgreSQL 连接、Schema 选表、按表加载
