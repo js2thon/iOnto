@@ -3064,14 +3064,21 @@ def _commit_raw_data(
     st.session_state.source_metadata = None
     st.session_state.v5_tbox_schema = None
 
-    # 元数据提取（TBox 上一步）
+    # 元数据提取：写入可组合 MetadataWorkbench（不清空已有 bundle，支持多源叠加）
     if preview_data:
         try:
-            from ontology_domain.metadata_extractor import extract_source_metadata
+            from ontology_domain.metadata_workbench import MetadataWorkbench
 
-            meta = extract_source_metadata(preview_data, source_kind=source_kind)
+            if st.session_state.get("metadata_workbench") is None:
+                st.session_state.metadata_workbench = MetadataWorkbench()
+            wb = st.session_state.metadata_workbench
+            keys = list(preview_data.keys())
+            bundle_name = f"{source_kind}:{','.join(keys[:3])}"
+            if len(keys) > 3:
+                bundle_name += "…"
+            wb.add_from_dataframes(preview_data, name=bundle_name, source_kind=source_kind)
+            meta = wb.get_working_copy()
             st.session_state.source_metadata = meta
-            # 预填主键建议
             for tname, tmeta in meta.tables.items():
                 if tmeta.suggested_primary_key:
                     st.session_state.pk_config[tname] = tmeta.suggested_primary_key
@@ -3502,31 +3509,65 @@ def _render_modeling_config(
                 })
         st.session_state.manual_links_config = manual_links
 
-        # ---- 元数据 → TBox（建模上一步）----
+        # ---- 元数据工作台：多源提取 / 编辑 / 组合 → TBox ----
         st.markdown("---")
-        st.markdown("**① 数据源元数据 → 生成 TBox**")
+        st.markdown("**① 元数据工作台（提取 · 编辑 · 多源组合 → TBox）**")
         st.caption(
-            "先从数据源提取列类型、主键/外键候选，再生成 V5 TBox（类/属性/关系），"
-            "确认后再加载实例（ABox）。"
+            "可多次导入数据源叠加为多个元数据 Bundle；启用/停用后合并，"
+            "再编辑表/列/关系，最后组合生成 V5 TBox。"
         )
-        meta = st.session_state.get("source_metadata")
-        if meta is None and usable:
-            if st.button("提取源元数据", key="v2_extract_meta"):
-                try:
-                    from ontology_domain.metadata_extractor import extract_source_metadata
+        from ontology_domain.metadata_workbench import MetadataWorkbench
 
-                    st.session_state.source_metadata = extract_source_metadata(
-                        usable, source_kind="dataframe"
-                    )
-                    meta = st.session_state.source_metadata
-                    for tname, tmeta in meta.tables.items():
-                        if tmeta.suggested_primary_key:
-                            st.session_state.pk_config[tname] = tmeta.suggested_primary_key
-                    st.success("元数据提取完成")
+        if st.session_state.get("metadata_workbench") is None:
+            st.session_state.metadata_workbench = MetadataWorkbench()
+        wb: MetadataWorkbench = st.session_state.metadata_workbench
+
+        c_ex1, c_ex2, c_ex3 = st.columns(3)
+        with c_ex1:
+            if usable and st.button("从当前数据提取并加入 Bundle", key="v2_wb_add_bundle"):
+                try:
+                    wb.add_from_dataframes(usable, name="manual_extract", source_kind="dataframe")
+                    st.session_state.source_metadata = wb.get_working_copy()
+                    st.success("已加入 Bundle 并合并工作副本")
                     st.rerun()
                 except Exception as exc:
-                    st.error(f"元数据提取失败：{exc}")
-        if meta is not None:
+                    st.error(str(exc))
+        with c_ex2:
+            if st.button("重建合并工作副本", key="v2_wb_rebuild"):
+                wb.rebuild_working_copy()
+                st.session_state.source_metadata = wb.get_working_copy()
+                st.rerun()
+        with c_ex3:
+            if st.button("清空全部 Bundle", key="v2_wb_clear"):
+                st.session_state.metadata_workbench = MetadataWorkbench()
+                st.session_state.source_metadata = None
+                st.rerun()
+
+        bundles = wb.list_bundles()
+        if bundles:
+            st.markdown("**元数据 Bundle 列表（可多选启用）**")
+            for b in bundles:
+                cols = st.columns([3, 1, 1, 1])
+                cols[0].write(
+                    f"`{b['name']}` · 表 {b['tables']} · 关系 {b['relationships']} · {b['source_kind']}"
+                )
+                en = cols[1].checkbox("启用", value=b["enabled"], key=f"v2_wb_en_{b['id']}")
+                if en != b["enabled"]:
+                    wb.set_enabled(b["id"], en)
+                    st.session_state.source_metadata = wb.get_working_copy()
+                    st.rerun()
+                if cols[2].button("删除", key=f"v2_wb_del_{b['id']}"):
+                    wb.remove_bundle(b["id"])
+                    st.session_state.source_metadata = wb.get_working_copy()
+                    st.rerun()
+        else:
+            st.info("尚无元数据 Bundle。加载数据源或点击「从当前数据提取并加入 Bundle」。")
+
+        meta = wb.get_working_copy()
+        st.session_state.source_metadata = meta
+
+        if meta.tables:
+            st.markdown("**合并后的工作副本**")
             meta_rows = []
             for tname, tmeta in meta.tables.items():
                 meta_rows.append(
@@ -3540,21 +3581,130 @@ def _render_modeling_config(
                     }
                 )
             st.dataframe(pd.DataFrame(meta_rows), use_container_width=True, hide_index=True)
-            with st.expander("列级元数据详情", expanded=False):
-                for tname, tmeta in meta.tables.items():
-                    st.markdown(f"**{tname}**")
+
+            with st.expander("编辑表 / 列元数据", expanded=False):
+                edit_table = st.selectbox(
+                    "选择表", list(meta.tables.keys()), key="v2_wb_edit_table"
+                )
+                tmeta = meta.tables[edit_table]
+                new_pk = st.selectbox(
+                    "建议主键",
+                    ["—"] + [c.name for c in tmeta.columns],
+                    index=(
+                        (["—"] + [c.name for c in tmeta.columns]).index(tmeta.suggested_primary_key)
+                        if tmeta.suggested_primary_key
+                        in [c.name for c in tmeta.columns]
+                        else 0
+                    ),
+                    key="v2_wb_edit_pk",
+                )
+                new_desc = st.text_input(
+                    "表描述", value=tmeta.description or "", key="v2_wb_edit_desc"
+                )
+                new_tname = st.text_input("重命名表（可选）", value=edit_table, key="v2_wb_edit_tname")
+                if st.button("保存表级修改", key="v2_wb_save_table"):
+                    try:
+                        wb.update_table(
+                            edit_table,
+                            suggested_primary_key=None if new_pk == "—" else new_pk,
+                            description=new_desc,
+                            rename_to=new_tname if new_tname != edit_table else None,
+                        )
+                        if new_pk != "—":
+                            st.session_state.pk_config[new_tname if new_tname != edit_table else edit_table] = new_pk
+                        st.session_state.source_metadata = wb.get_working_copy()
+                        st.success("表元数据已更新")
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(str(exc))
+
+                col_names = [c.name for c in tmeta.columns]
+                edit_col = st.selectbox("选择列", col_names, key="v2_wb_edit_col")
+                col_obj = next(c for c in tmeta.columns if c.name == edit_col)
+                logical = st.selectbox(
+                    "逻辑类型",
+                    ["string", "integer", "number", "boolean", "date", "datetime", "json"],
+                    index=["string", "integer", "number", "boolean", "date", "datetime", "json"].index(
+                        col_obj.logical_type
+                        if col_obj.logical_type
+                        in {"string", "integer", "number", "boolean", "date", "datetime", "json"}
+                        else "string"
+                    ),
+                    key="v2_wb_edit_ltype",
+                )
+                nullable = st.checkbox("可空", value=col_obj.nullable, key="v2_wb_edit_null")
+                spk = st.checkbox("疑似主键", value=col_obj.suspected_pk, key="v2_wb_edit_spk")
+                sfk = st.checkbox("疑似外键", value=col_obj.suspected_fk, key="v2_wb_edit_sfk")
+                rename_col = st.text_input("重命名列（可选）", value=edit_col, key="v2_wb_edit_cname")
+                if st.button("保存列级修改", key="v2_wb_save_col"):
+                    try:
+                        wb.update_column(
+                            edit_table,
+                            edit_col,
+                            logical_type=logical,
+                            nullable=nullable,
+                            suspected_pk=spk,
+                            suspected_fk=sfk,
+                            rename_to=rename_col if rename_col != edit_col else None,
+                        )
+                        st.session_state.source_metadata = wb.get_working_copy()
+                        st.success("列元数据已更新")
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(str(exc))
+                if st.button("从工作副本排除该表", key="v2_wb_exclude_table"):
+                    wb.exclude_table(edit_table)
+                    st.session_state.source_metadata = wb.get_working_copy()
+                    st.rerun()
+
+            with st.expander("关系候选编辑", expanded=False):
+                if meta.relationship_candidates:
                     st.dataframe(
-                        pd.DataFrame([c.to_dict() for c in tmeta.columns]),
+                        pd.DataFrame(meta.relationship_candidates),
                         use_container_width=True,
                         hide_index=True,
                     )
-            if meta.relationship_candidates:
-                st.markdown("关系候选（按置信度）")
-                st.dataframe(
-                    pd.DataFrame(meta.relationship_candidates),
-                    use_container_width=True,
-                    hide_index=True,
-                )
+                    del_idx = st.number_input(
+                        "删除关系候选索引",
+                        min_value=0,
+                        max_value=max(0, len(meta.relationship_candidates) - 1),
+                        value=0,
+                        key="v2_wb_rel_del_idx",
+                    )
+                    if st.button("删除该关系候选", key="v2_wb_rel_del"):
+                        wb.remove_relationship_candidate(int(del_idx))
+                        st.rerun()
+                tnames = list(meta.tables.keys())
+                if len(tnames) >= 1:
+                    st.markdown("手动添加关系候选")
+                    rs = st.selectbox("源表", tnames, key="v2_wb_rel_src")
+                    rt = st.selectbox("目标表", tnames, key="v2_wb_rel_tgt")
+                    rsc = st.selectbox(
+                        "源列",
+                        [c.name for c in meta.tables[rs].columns],
+                        key="v2_wb_rel_scol",
+                    )
+                    rtc = st.selectbox(
+                        "目标列",
+                        [c.name for c in meta.tables[rt].columns],
+                        key="v2_wb_rel_tcol",
+                    )
+                    rconf = st.slider("置信度", 0.0, 1.0, 0.8, 0.05, key="v2_wb_rel_conf")
+                    if st.button("添加关系候选", key="v2_wb_rel_add"):
+                        try:
+                            wb.add_relationship_candidate(
+                                rs, rt, rsc, rtc, confidence=float(rconf)
+                            )
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(str(exc))
+
+            allow_tables = st.multiselect(
+                "参与 TBox 生成的表（默认全部）",
+                list(meta.tables.keys()),
+                default=list(meta.tables.keys()),
+                key="v2_wb_allow_tables",
+            )
             min_conf = st.slider(
                 "关系最小置信度",
                 min_value=0.0,
@@ -3563,23 +3713,27 @@ def _render_modeling_config(
                 step=0.05,
                 key="v2_tbox_min_conf",
             )
-            if st.button("根据元数据生成 TBox（仅结构，不含实例）", key="v2_gen_tbox"):
+            if st.button(
+                "组合当前元数据生成 TBox（仅结构）",
+                type="primary",
+                key="v2_gen_tbox",
+            ):
                 try:
                     from ontology_domain.tbox_generator import (
                         apply_tbox_to_legacy_ontology,
-                        generate_tbox_from_metadata,
+                        generate_tbox_from_workbench,
                         metadata_to_tbox_summary,
                     )
 
-                    tbox = generate_tbox_from_metadata(
-                        meta,
+                    tbox = generate_tbox_from_workbench(
+                        wb,
                         include_relationships=True,
                         min_rel_confidence=float(min_conf),
                         primary_key_overrides=dict(st.session_state.pk_config),
+                        table_allowlist=allow_tables or None,
                     )
                     st.session_state.v5_tbox_schema = tbox
                     st.session_state.v5_schema = tbox
-                    # 同步到 legacy 结构（空实例）
                     if st.session_state.ontology_v2 is None:
                         st.session_state.ontology_v2 = Ontology()
                     apply_tbox_to_legacy_ontology(tbox, st.session_state.ontology_v2)
@@ -3602,6 +3756,13 @@ def _render_modeling_config(
                     mime="application/json",
                     key="v2_tbox_dl",
                 )
+            st.download_button(
+                "下载元数据工作台 JSON",
+                data=wb.to_json(),
+                file_name="ionto_metadata_workbench.json",
+                mime="application/json",
+                key="v2_wb_dl",
+            )
 
         st.markdown("---")
         st.markdown("**② 确认并生成完整本体（TBox + ABox 实例）**")

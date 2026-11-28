@@ -29,6 +29,40 @@ def _type_name_from_table(table: str) -> str:
     return str(table).strip()
 
 
+def generate_tbox_from_workbench(
+    workbench: Any,
+    *,
+    ontology_id: Optional[str] = None,
+    include_relationships: bool = True,
+    min_rel_confidence: float = 0.5,
+    primary_key_overrides: Optional[Dict[str, str]] = None,
+    table_allowlist: Optional[List[str]] = None,
+) -> OntologySchema:
+    """从 MetadataWorkbench 工作副本（多源合并 + 人工编辑）生成 TBox。"""
+    meta = workbench.get_working_copy()
+    if table_allowlist is not None:
+        allow = set(table_allowlist)
+        filtered_tables = {k: v for k, v in meta.tables.items() if k in allow}
+        filtered_rels = [
+            r
+            for r in meta.relationship_candidates
+            if r.get("source_table") in allow and r.get("target_table") in allow
+        ]
+        meta = SourceMetadata(
+            tables=filtered_tables,
+            relationship_candidates=filtered_rels,
+            extracted_at=meta.extracted_at,
+            source_kind=meta.source_kind,
+        )
+    return generate_tbox_from_metadata(
+        meta,
+        ontology_id=ontology_id,
+        include_relationships=include_relationships,
+        min_rel_confidence=min_rel_confidence,
+        primary_key_overrides=primary_key_overrides,
+    )
+
+
 def generate_tbox_from_metadata(
     metadata: SourceMetadata,
     *,
